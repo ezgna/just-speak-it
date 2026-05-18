@@ -1,126 +1,171 @@
-import { Image } from 'expo-image';
 import { SymbolView } from 'expo-symbols';
-import { Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
+import { useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ExternalLink } from '@/components/external-link';
+import {
+  ActionButton,
+  MetricTile,
+  Pill,
+  SectionHeader,
+  Surface,
+  useDailyPalette,
+} from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Collapsible } from '@/components/ui/collapsible';
-import { WebBadge } from '@/components/web-badge';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
+import { practiceItems, practiceModes, reviewItems } from '@/data/daily-to-english';
 
-export default function TabTwoScreen() {
+export default function ReviewScreen() {
   const safeAreaInsets = useSafeAreaInsets();
+  const palette = useDailyPalette();
+  const [activeMode, setActiveMode] = useState(practiceModes[0].id);
+
   const insets = {
     ...safeAreaInsets,
-    bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
+    bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
   };
-  const theme = useTheme();
 
-  const contentPlatformStyle = Platform.select({
-    android: {
-      paddingTop: insets.top,
-      paddingLeft: insets.left,
-      paddingRight: insets.right,
-      paddingBottom: insets.bottom,
-    },
-    web: {
-      paddingTop: Spacing.six,
-      paddingBottom: Spacing.four,
-    },
-  });
+  const activeModeDetail = practiceModes.find((mode) => mode.id === activeMode) ?? practiceModes[0];
 
   return (
     <ScrollView
-      style={[styles.scrollView, { backgroundColor: theme.background }]}
+      style={[styles.scrollView, { backgroundColor: palette.background }]}
       contentInset={insets}
-      contentContainerStyle={[styles.contentContainer, contentPlatformStyle]}>
-      <ThemedView style={styles.container}>
-        <ThemedView style={styles.titleContainer}>
-          <ThemedText type="subtitle">Explore</ThemedText>
-          <ThemedText style={styles.centerText} themeColor="textSecondary">
-            This starter app includes example{'\n'}code to help you get started.
-          </ThemedText>
+      contentContainerStyle={[
+        styles.contentContainer,
+        {
+          paddingTop: insets.top + Spacing.four,
+          paddingBottom: insets.bottom,
+          paddingLeft: Math.max(insets.left, Spacing.three),
+          paddingRight: Math.max(insets.right, Spacing.three),
+        },
+      ]}>
+      <View style={styles.container}>
+        <SectionHeader
+          eyebrow="REVIEW"
+          title="言えなかった文だけ戻ってくる"
+          description="添削で終わらせず、次に口から出るまで再利用する。"
+        />
 
-          <ExternalLink href="https://docs.expo.dev" asChild>
-            <Pressable style={({ pressed }) => pressed && styles.pressed}>
-              <ThemedView type="backgroundElement" style={styles.linkButton}>
-                <ThemedText type="link">Expo documentation</ThemedText>
-                <SymbolView
-                  tintColor={theme.text}
-                  name={{ ios: 'arrow.up.right.square', android: 'link', web: 'link' }}
-                  size={12}
-                />
-              </ThemedView>
-            </Pressable>
-          </ExternalLink>
-        </ThemedView>
+        <View style={styles.metricsRow}>
+          <MetricTile label="今日の復習" value="2枚" tone="coral" />
+          <MetricTile label="型ストック" value="5個" tone="teal" />
+          <MetricTile label="言い直し" value="1回" tone="green" />
+        </View>
 
-        <ThemedView style={styles.sectionsWrapper}>
-          <Collapsible title="File-based routing">
-            <ThemedText type="small">
-              This app has two screens: <ThemedText type="code">src/app/index.tsx</ThemedText> and{' '}
-              <ThemedText type="code">src/app/explore.tsx</ThemedText>
-            </ThemedText>
-            <ThemedText type="small">
-              The layout file in <ThemedText type="code">src/app/_layout.tsx</ThemedText> sets up
-              the tab navigator.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/router/introduction">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
+        <Surface>
+          <SectionHeader
+            eyebrow="MODE"
+            title="練習モード"
+            description="MVPではこの3つを見せれば、単なる日記アプリではないことが伝わる。"
+          />
 
-          <Collapsible title="Android, iOS, and web support">
-            <ThemedView type="backgroundElement" style={styles.collapsibleContent}>
-              <ThemedText type="small">
-                You can open this project on Android, iOS, and the web. To open the web version,
-                press <ThemedText type="smallBold">w</ThemedText> in the terminal running this
-                project.
-              </ThemedText>
-              <Image
-                source={require('@/assets/images/tutorial-web.png')}
-                style={styles.imageTutorial}
+          <View style={styles.modeTabs}>
+            {practiceModes.map((mode) => {
+              const active = mode.id === activeMode;
+              return (
+                <Pressable
+                  key={mode.id}
+                  onPress={() => setActiveMode(mode.id)}
+                  style={({ pressed }) => [styles.modeButton, pressed && styles.pressed]}>
+                  <View
+                    style={[
+                      styles.modeButtonInner,
+                      {
+                        backgroundColor: active ? palette.tealSoft : palette.backgroundElement,
+                        borderColor: active ? palette.teal : palette.border,
+                      },
+                    ]}>
+                    <Pill tone={active ? 'teal' : 'neutral'}>{mode.badge}</Pill>
+                    <ThemedText type="smallBold" selectable>
+                      {mode.title}
+                    </ThemedText>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <View style={[styles.activeModePanel, { backgroundColor: palette.tealSoft }]}>
+            <View style={styles.activeModeIcon}>
+              <SymbolView
+                name={{ ios: 'speaker.wave.2.fill', android: 'record_voice_over', web: 'record_voice_over' }}
+                size={22}
+                tintColor={palette.teal}
               />
-            </ThemedView>
-          </Collapsible>
+            </View>
+            <View style={styles.activeModeText}>
+              <ThemedText type="smallBold" selectable>
+                {activeModeDetail.title}
+              </ThemedText>
+              <ThemedText type="small" themeColor="textSecondary" selectable>
+                {activeModeDetail.description}
+              </ThemedText>
+            </View>
+          </View>
+        </Surface>
 
-          <Collapsible title="Images">
-            <ThemedText type="small">
-              For static images, you can use the <ThemedText type="code">@2x</ThemedText> and{' '}
-              <ThemedText type="code">@3x</ThemedText> suffixes to provide files for different
-              screen densities.
-            </ThemedText>
-            <Image source={require('@/assets/images/react-logo.png')} style={styles.imageReact} />
-            <ExternalLink href="https://reactnative.dev/docs/images">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
+        <Surface>
+          <SectionHeader
+            eyebrow="DUE"
+            title="今日の再利用カード"
+            description="昨日や一週間前に詰まった文だけを、短く出し直す。"
+          />
 
-          <Collapsible title="Light and dark mode components">
-            <ThemedText type="small">
-              This template has light and dark mode support. The{' '}
-              <ThemedText type="code">useColorScheme()</ThemedText> hook lets you inspect what the
-              user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-            </ThemedText>
-            <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-              <ThemedText type="linkPrimary">Learn more</ThemedText>
-            </ExternalLink>
-          </Collapsible>
+          <View style={styles.reviewList}>
+            {reviewItems.map((item) => (
+              <View key={item.id} style={[styles.reviewCard, { borderColor: palette.border }]}>
+                <View style={styles.reviewCardHeader}>
+                  <Pill tone={item.nextReview === '今日' ? 'coral' : 'amber'}>
+                    {item.nextReview}
+                  </Pill>
+                  <ThemedText type="code" themeColor="textSecondary">
+                    {item.weakPoint}
+                  </ThemedText>
+                </View>
+                <ThemedText type="smallBold" selectable>
+                  {item.japanese}
+                </ThemedText>
+                <View style={styles.answerPreview}>
+                  <ThemedText type="small" themeColor="textSecondary" selectable>
+                    前回:
+                  </ThemedText>
+                  <ThemedText type="small" selectable>
+                    {item.lastAnswer}
+                  </ThemedText>
+                </View>
+              </View>
+            ))}
+          </View>
 
-          <Collapsible title="Animations">
-            <ThemedText type="small">
-              This template includes an example of an animated component. The{' '}
-              <ThemedText type="code">src/components/ui/collapsible.tsx</ThemedText> component uses
-              the powerful <ThemedText type="code">react-native-reanimated</ThemedText> library to
-              animate opening this hint.
-            </ThemedText>
-          </Collapsible>
-        </ThemedView>
-        {Platform.OS === 'web' && <WebBadge />}
-      </ThemedView>
+          <ActionButton
+            label="今日の復習を始める"
+            icon={{ ios: 'play.fill', android: 'play_arrow', web: 'play_arrow' }}
+          />
+        </Surface>
+
+        <View style={styles.patternSection}>
+          <SectionHeader
+            eyebrow="PATTERNS"
+            title="使い回せる型"
+            description="日記の文を、次の日も別の場面で使える言い方に変える。"
+          />
+
+          <View style={styles.patternGrid}>
+            {practiceItems.map((item) => (
+              <Surface key={item.id} style={styles.patternCard}>
+                <Pill tone="blue">{item.patternLabel}</Pill>
+                <ThemedText type="smallBold" selectable>
+                  {item.pattern}
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary" selectable>
+                  {item.simpleEnglish}
+                </ThemedText>
+              </Surface>
+            ))}
+          </View>
+        </View>
+      </View>
     </ScrollView>
   );
 }
@@ -130,51 +175,90 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
+    alignItems: 'center',
   },
   container: {
+    width: '100%',
     maxWidth: MaxContentWidth,
-    flexGrow: 1,
+    gap: Spacing.four,
   },
-  titleContainer: {
+  metricsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.three,
+  },
+  modeTabs: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  modeButton: {
+    flexGrow: 1,
+    flexBasis: 170,
+  },
+  modeButtonInner: {
+    minHeight: 112,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  activeModePanel: {
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    padding: Spacing.three,
+    flexDirection: 'row',
     gap: Spacing.three,
     alignItems: 'center',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.six,
   },
-  centerText: {
-    textAlign: 'center',
+  activeModeIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeModeText: {
+    flex: 1,
+    gap: Spacing.one,
+  },
+  reviewList: {
+    gap: Spacing.two,
+  },
+  reviewCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  reviewCardHeader: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  answerPreview: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.one,
+  },
+  patternSection: {
+    gap: Spacing.three,
+  },
+  patternGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.three,
+  },
+  patternCard: {
+    flexGrow: 1,
+    flexBasis: 250,
+    padding: Spacing.three,
   },
   pressed: {
-    opacity: 0.7,
-  },
-  linkButton: {
-    flexDirection: 'row',
-    paddingHorizontal: Spacing.four,
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.five,
-    justifyContent: 'center',
-    gap: Spacing.one,
-    alignItems: 'center',
-  },
-  sectionsWrapper: {
-    gap: Spacing.five,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
-  },
-  collapsibleContent: {
-    alignItems: 'center',
-  },
-  imageTutorial: {
-    width: '100%',
-    aspectRatio: 296 / 171,
-    borderRadius: Spacing.three,
-    marginTop: Spacing.two,
-  },
-  imageReact: {
-    width: 100,
-    height: 100,
-    alignSelf: 'center',
+    opacity: 0.75,
   },
 });
