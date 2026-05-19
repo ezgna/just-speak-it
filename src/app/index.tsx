@@ -1,6 +1,13 @@
+import {
+  AudioModule,
+  RecordingPresets,
+  setAudioModeAsync,
+  useAudioRecorder,
+  useAudioRecorderState,
+} from 'expo-audio';
 import { SymbolView } from 'expo-symbols';
-import { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import {
@@ -14,13 +21,33 @@ import {
 } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { practiceItems, sampleDiaryText } from '@/data/daily-to-english';
+import { practiceItems, sampleDiaryText, type PracticeItem } from '@/data/daily-to-english';
+import { ensureAnonymousSession, type BackendSessionState } from '@/lib/backend/auth';
+import { generatePracticeFromDiary } from '@/lib/backend/practice';
+import { transcribeRecording } from '@/lib/backend/transcription';
+import type { Database } from '@/lib/supabase/database.types';
+
+type PracticeItemRow = Database['public']['Tables']['practice_items']['Row'];
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const palette = useDailyPalette();
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
+  const recorderState = useAudioRecorderState(audioRecorder);
   const [diaryText, setDiaryText] = useState(sampleDiaryText);
-  const [isRecording, setIsRecording] = useState(false);
+  const [practiceCards, setPracticeCards] = useState<PracticeItem[]>(practiceItems);
+  const [isRecordingBusy, setIsRecordingBusy] = useState(false);
+  const [recordingUri, setRecordingUri] = useState<string | null>(null);
+  const [recordingError, setRecordingError] = useState<string | null>(null);
+  const [backendSession, setBackendSession] = useState<BackendSessionState>({
+    status: 'not-configured',
+    userId: null,
+  });
+  const [backendError, setBackendError] = useState<string | null>(null);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
+  const [isGeneratingPractice, setIsGeneratingPractice] = useState(false);
+  const [generationError, setGenerationError] = useState<string | null>(null);
   const [hasGenerated, setHasGenerated] = useState(true);
   const [selectedId, setSelectedId] = useState(practiceItems[0].id);
   const [answer, setAnswer] = useState("I haven't decided the details yet.");
@@ -28,21 +55,77 @@ export default function HomeScreen() {
   const [retryCount, setRetryCount] = useState(1);
 
   const selectedItem = useMemo(
-    () => practiceItems.find((item) => item.id === selectedId) ?? practiceItems[0],
-    [selectedId]
+    () => practiceCards.find((item) => item.id === selectedId) ?? practiceCards[0] ?? practiceItems[0],
+    [practiceCards, selectedId]
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function prepareBackendSession() {
+      try {
+        const session = await ensureAnonymousSession();
+
+        if (isMounted) {
+          setBackendSession(session);
+          setBackendError(null);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setBackendError(error instanceof Error ? error.message : 'Supabase接続に失敗しました。');
+        }
+      }
+    }
+
+    prepareBackendSession();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const insets = {
     ...safeAreaInsets,
     bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
   };
 
-  function handleGenerate() {
-    setHasGenerated(true);
-    setSelectedId(practiceItems[0].id);
-    setAnswer('');
-    setShowFeedback(false);
-    setRetryCount(1);
+  async function handleGenerate() {
+    const trimmedDiaryText = diaryText.trim();
+
+    if (!trimmedDiaryText) {
+      const message = '練習文を作るには、まず日本語の日記を書いてください。';
+      setGenerationError(message);
+      Alert.alert('練習文を作れません', message);
+      return;
+    }
+
+    setIsGeneratingPractice(true);
+    setGenerationError(null);
+
+    try {
+      const source = recordingUri ? 'voice' : 'text';
+      const result = await generatePracticeFromDiary({
+        diaryText: trimmedDiaryText,
+        source,
+        transcriptText: source === 'voice' ? trimmedDiaryText : undefined,
+      });
+      const generatedCards = [...result.practiceItems]
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map(mapPracticeItemRow);
+
+      setPracticeCards(generatedCards);
+      setHasGenerated(true);
+      setSelectedId(generatedCards[0].id);
+      setAnswer('');
+      setShowFeedback(false);
+      setRetryCount(1);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '練習文の作成に失敗しました。';
+      setGenerationError(message);
+      Alert.alert('練習文を作れません', message);
+    } finally {
+      setIsGeneratingPractice(false);
+    }
   }
 
   function handleSelectCard(id: string) {
@@ -60,6 +143,83 @@ export default function HomeScreen() {
     setRetryCount((current) => current + 1);
     setAnswer('');
     setShowFeedback(false);
+  }
+
+  async function startRecording() {
+    setIsRecordingBusy(true);
+    setRecordingError(null);
+
+    try {
+      const permission = await AudioModule.requestRecordingPermissionsAsync();
+      if (!permission.granted) {
+        const message = 'マイク権限がないため録音できません。';
+        setRecordingError(message);
+        Alert.alert('録音できません', message);
+        return;
+      }
+
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
+      });
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
+      setRecordingUri(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '録音の開始に失敗しました。';
+      setRecordingError(message);
+    } finally {
+      setIsRecordingBusy(false);
+    }
+  }
+
+  async function stopRecording() {
+    setIsRecordingBusy(true);
+    setRecordingError(null);
+
+    try {
+      await audioRecorder.stop();
+      setRecordingUri(audioRecorder.uri ?? recorderState.url);
+      await setAudioModeAsync({
+        allowsRecording: false,
+        playsInSilentMode: true,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '録音の停止に失敗しました。';
+      setRecordingError(message);
+    } finally {
+      setIsRecordingBusy(false);
+    }
+  }
+
+  async function handleRecordingPress() {
+    if (recorderState.isRecording) {
+      await stopRecording();
+      return;
+    }
+
+    await startRecording();
+  }
+
+  async function handleTranscribePress() {
+    if (!recordingUri) {
+      return;
+    }
+
+    setIsTranscribing(true);
+    setTranscriptionError(null);
+
+    try {
+      const transcript = await transcribeRecording(recordingUri);
+      setDiaryText(transcript);
+      setGenerationError(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '文字起こしに失敗しました。';
+      setTranscriptionError(message);
+      Alert.alert('文字起こしできません', message);
+    } finally {
+      setIsTranscribing(false);
+    }
   }
 
   return (
@@ -122,19 +282,82 @@ export default function HomeScreen() {
 
           <View style={styles.buttonRow}>
             <ActionButton
-              label={isRecording ? '録音中の想定' : '音声で話す'}
-              icon={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
-              variant={isRecording ? 'secondary' : 'primary'}
-              onPress={() => setIsRecording((current) => !current)}
+              label={
+                isRecordingBusy
+                  ? '準備中'
+                  : recorderState.isRecording
+                    ? '録音を止める'
+                    : '音声で話す'
+              }
+              icon={
+                recorderState.isRecording
+                  ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
+                  : { ios: 'mic.fill', android: 'mic', web: 'mic' }
+              }
+              variant={recorderState.isRecording ? 'secondary' : 'primary'}
+              disabled={isRecordingBusy}
+              onPress={handleRecordingPress}
               style={styles.flexButton}
             />
             <ActionButton
-              label="練習文を作る"
+              label={isTranscribing ? '文字起こし中' : '文字起こしする'}
+              icon={{ ios: 'text.bubble.fill', android: 'textsms', web: 'textsms' }}
+              variant="secondary"
+              disabled={!recordingUri || isTranscribing || backendSession.status !== 'ready'}
+              onPress={handleTranscribePress}
+              style={styles.flexButton}
+            />
+            <ActionButton
+              label={isGeneratingPractice ? '生成中' : '練習文を作る'}
               icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
               variant="secondary"
+              disabled={isGeneratingPractice || backendSession.status !== 'ready'}
               onPress={handleGenerate}
               style={styles.flexButton}
             />
+          </View>
+
+          <View style={[styles.recordingStatus, { borderColor: palette.border }]}>
+            <View style={styles.statusPillRow}>
+              <Pill tone={recorderState.isRecording ? 'coral' : recordingUri ? 'green' : 'neutral'}>
+                {recorderState.isRecording ? '録音中' : recordingUri ? '録音済み' : '未録音'}
+              </Pill>
+              <Pill tone={backendSession.status === 'ready' ? 'green' : 'neutral'}>
+                {backendSession.status === 'ready' ? 'Supabase接続済み' : 'Supabase未設定'}
+              </Pill>
+            </View>
+            <ThemedText type="small" themeColor="textSecondary" selectable>
+              {recorderState.isRecording
+                ? `録音時間: ${formatDuration(recorderState.durationMillis)}`
+                : recordingUri
+                  ? `録音ファイル: ${recordingUri}`
+                  : '停止後に音声ファイルURIをここに表示します。'}
+            </ThemedText>
+            {backendSession.userId && (
+              <ThemedText type="small" themeColor="textSecondary" selectable>
+                {`匿名ユーザー: ${backendSession.userId.slice(0, 8)}`}
+              </ThemedText>
+            )}
+            {recordingError && (
+              <ThemedText type="small" style={{ color: palette.coral }} selectable>
+                {recordingError}
+              </ThemedText>
+            )}
+            {backendError && (
+              <ThemedText type="small" style={{ color: palette.coral }} selectable>
+                {backendError}
+              </ThemedText>
+            )}
+            {transcriptionError && (
+              <ThemedText type="small" style={{ color: palette.coral }} selectable>
+                {transcriptionError}
+              </ThemedText>
+            )}
+            {generationError && (
+              <ThemedText type="small" style={{ color: palette.coral }} selectable>
+                {generationError}
+              </ThemedText>
+            )}
           </View>
         </Surface>
 
@@ -147,7 +370,7 @@ export default function HomeScreen() {
             />
 
             <View style={styles.practiceGrid}>
-              {practiceItems.map((item, index) => {
+              {practiceCards.map((item, index) => {
                 const selected = item.id === selectedId;
                 return (
                   <Pressable
@@ -286,6 +509,28 @@ export default function HomeScreen() {
   );
 }
 
+function formatDuration(durationMillis: number) {
+  const totalSeconds = Math.max(0, Math.floor(durationMillis / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function mapPracticeItemRow(item: PracticeItemRow): PracticeItem {
+  return {
+    id: item.id,
+    japanese: item.japanese,
+    intent: item.intent,
+    patternLabel: item.pattern_label,
+    pattern: item.pattern,
+    naturalEnglish: item.natural_english,
+    simpleEnglish: item.simple_english,
+    shortPhrase: item.short_phrase,
+    stuckPoints: item.stuck_points,
+    nextReview: '明日',
+  };
+}
+
 const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
@@ -347,6 +592,18 @@ const styles = StyleSheet.create({
   flexButton: {
     flexGrow: 1,
   },
+  recordingStatus: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    padding: Spacing.three,
+    gap: Spacing.two,
+  },
+  statusPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
   gridSection: {
     gap: Spacing.three,
   },
@@ -361,7 +618,6 @@ const styles = StyleSheet.create({
   },
   practiceCard: {
     minHeight: 190,
-    height: '100%',
   },
   cardTopRow: {
     flexDirection: 'row',
