@@ -1,57 +1,30 @@
 import { errorResponse, getAuthenticatedContext, jsonResponse, optionsResponse } from '../_shared/http.ts';
 import { createOpenAIJsonResponse } from '../_shared/openai.ts';
 
-type PracticeItemDraft = {
+type TranslationCard = {
   japanese: string;
-  intent: string;
-  natural_english: string;
-  simple_english: string;
-  pattern_label: string;
-  pattern: string;
-  short_phrase: string;
-  stuck_points: string[];
+  english: string;
 };
 
 type GeneratePracticeOutput = {
-  items: PracticeItemDraft[];
+  cards: TranslationCard[];
 };
 
-const practiceSchema = {
+const translationCardSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['items'],
+  required: ['cards'],
   properties: {
-    items: {
+    cards: {
       type: 'array',
-      minItems: 5,
-      maxItems: 5,
+      minItems: 1,
       items: {
         type: 'object',
         additionalProperties: false,
-        required: [
-          'japanese',
-          'intent',
-          'natural_english',
-          'simple_english',
-          'pattern_label',
-          'pattern',
-          'short_phrase',
-          'stuck_points',
-        ],
+        required: ['japanese', 'english'],
         properties: {
           japanese: { type: 'string' },
-          intent: { type: 'string' },
-          natural_english: { type: 'string' },
-          simple_english: { type: 'string' },
-          pattern_label: { type: 'string' },
-          pattern: { type: 'string' },
-          short_phrase: { type: 'string' },
-          stuck_points: {
-            type: 'array',
-            minItems: 1,
-            maxItems: 4,
-            items: { type: 'string' },
-          },
+          english: { type: 'string' },
         },
       },
     },
@@ -75,71 +48,88 @@ export default {
     }
 
     const body = await req.json().catch(() => null);
-    const diaryText = typeof body?.diaryText === 'string' ? body.diaryText.trim() : '';
+    const cleanedText =
+      typeof body?.cleanedText === 'string' && body.cleanedText.trim()
+        ? body.cleanedText.trim()
+        : typeof body?.diaryText === 'string'
+          ? body.diaryText.trim()
+          : '';
+    const rawTranscriptText =
+      typeof body?.rawTranscriptText === 'string' && body.rawTranscriptText.trim()
+        ? body.rawTranscriptText.trim()
+        : typeof body?.transcriptText === 'string' && body.transcriptText.trim()
+          ? body.transcriptText.trim()
+          : cleanedText;
 
-    if (!diaryText) {
-      return errorResponse('diaryTextが必要です。');
+    if (!cleanedText) {
+      return errorResponse('cleanedTextが必要です。');
     }
 
     const output = await createOpenAIJsonResponse<GeneratePracticeOutput>({
-      schemaName: 'daily_to_english_practice',
-      schema: practiceSchema,
-      instructions:
-        'あなたは日本語話者向けの英語学習コーチです。日本語の日記から、英語で言える価値が高い文を5個だけ抽出してください。丸ごと翻訳ではなく、会話で再利用できる単位に分けてください。',
-      input: diaryText,
+      schemaName: 'daily_to_english_translation_cards',
+      schema: translationCardSchema,
+      instructions: [
+        'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
+        '入力は日本語の文字起こしです。まず全体の意味を理解し、英語ならどこまでを一文にするのが自然かを逆算してください。',
+        '日本語の句点や話し言葉の切れ目に引きずられず、英語ネイティブが自然に言う一文ごとのカードに分けてください。',
+        '各カードは japanese と english の一対一にしてください。',
+        'japanese は、その english に対応する日本語の意味の塊だけを入れてください。文の途中で不自然に切らないでください。',
+        'english は説明調ではなく、実際にネイティブが会話や打ち合わせで言う自然な一文にしてください。',
+        'カード数に上限はありません。無理に増やさず、自然に分けられる分だけ返してください。',
+      ].join('\n'),
+      input: cleanedText,
+      maxOutputTokens: 2400,
     });
+
+    const cardDrafts = output.cards
+      .map((card, index) => ({
+        sort_order: index + 1,
+        japanese: card.japanese.trim(),
+        english: card.english.trim(),
+      }))
+      .filter((card) => card.japanese && card.english);
+
+    if (cardDrafts.length === 0) {
+      return errorResponse('英語カードを作成できませんでした。', 502);
+    }
 
     const { data: diaryEntry, error: diaryError } = await context.supabase
       .from('diary_entries')
       .insert({
         user_id: userId,
-        source: body?.source === 'voice' ? 'voice' : 'text',
-        original_text: diaryText,
-        transcript_text: typeof body?.transcriptText === 'string' ? body.transcriptText : null,
+        source: body?.source === 'text' ? 'text' : 'voice',
+        raw_transcript_text: rawTranscriptText,
+        cleaned_text: cleanedText,
       })
-      .select('id, user_id, source, original_text, transcript_text, created_at')
+      .select('id, user_id, source, raw_transcript_text, cleaned_text, created_at')
       .single();
 
     if (diaryError) {
       return errorResponse(diaryError.message, 500);
     }
 
-    const itemRows = output.items.map((item, index) => ({
+    const cardRows = cardDrafts.map((card) => ({
       user_id: userId,
       diary_entry_id: diaryEntry.id,
-      japanese: item.japanese,
-      intent: item.intent,
-      natural_english: item.natural_english,
-      simple_english: item.simple_english,
-      pattern_label: item.pattern_label,
-      pattern: item.pattern,
-      short_phrase: item.short_phrase,
-      stuck_points: item.stuck_points,
-      sort_order: index + 1,
+      sort_order: card.sort_order,
+      japanese: card.japanese,
+      english: card.english,
     }));
 
-    const { data: practiceItems, error: itemsError } = await context.supabase
-      .from('practice_items')
-      .insert(itemRows)
-      .select('*');
+    const { data: cards, error: cardsError } = await context.supabase
+      .from('translation_cards')
+      .insert(cardRows)
+      .select('id, diary_entry_id, sort_order, japanese, english, created_at')
+      .order('sort_order', { ascending: true });
 
-    if (itemsError) {
-      return errorResponse(itemsError.message, 500);
+    if (cardsError) {
+      return errorResponse(cardsError.message, 500);
     }
 
-    const firstDueAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const reviewRows = practiceItems.map((item: { id: string }) => ({
-      user_id: userId,
-      practice_item_id: item.id,
-      due_at: firstDueAt,
-    }));
-
-    const { error: reviewError } = await context.supabase.from('review_schedules').insert(reviewRows);
-
-    if (reviewError) {
-      return errorResponse(reviewError.message, 500);
+    if (!cards?.length) {
+      return errorResponse('英語カードを保存できませんでした。', 500);
     }
 
-    return jsonResponse({ diaryEntry, practiceItems });
+    return jsonResponse({ diaryEntry, cards });
   },
 };

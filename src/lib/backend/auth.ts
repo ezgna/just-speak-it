@@ -10,14 +10,14 @@ export async function ensureAnonymousSession(): Promise<BackendSessionState> {
   }
 
   const supabase = requireSupabaseClient();
-  const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+  const { data: userData, error: userError } = await supabase.auth.getUser();
 
-  if (sessionError) {
-    throw sessionError;
+  if (userData.user && !userError) {
+    return { status: 'ready', userId: userData.user.id };
   }
 
-  if (sessionData.session?.user) {
-    return { status: 'ready', userId: sessionData.session.user.id };
+  if (userError) {
+    await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined);
   }
 
   const { data, error } = await supabase.auth.signInAnonymously();

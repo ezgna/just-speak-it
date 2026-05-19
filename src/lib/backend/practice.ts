@@ -1,25 +1,65 @@
 import { ensureAnonymousSession } from '@/lib/backend/auth';
 import { requireSupabaseClient } from '@/lib/supabase/client';
-import type { Database } from '@/lib/supabase/database.types';
 
-type DiaryEntryRow = Database['public']['Tables']['diary_entries']['Row'];
-type PracticeItemRow = Database['public']['Tables']['practice_items']['Row'];
+export type TranslationCard = {
+  id: string;
+  diaryEntryId: string;
+  sortOrder: number;
+  japanese: string;
+  english: string;
+  createdAt?: string;
+};
+
+type TranslationCardRow = {
+  id: string;
+  diary_entry_id: string;
+  sort_order: number;
+  japanese: string;
+  english: string;
+  created_at?: string;
+};
+
+export type DiaryEntry = {
+  id: string;
+  source: 'text' | 'voice';
+  transcriptText: string;
+  rawTranscriptText: string;
+  cleanedText: string;
+  createdAt: string;
+  cards: TranslationCard[];
+};
+
+type DiaryEntryRow = {
+  id: string;
+  source: 'text' | 'voice';
+  raw_transcript_text: string;
+  cleaned_text: string;
+  created_at: string;
+};
 
 export type GeneratePracticeParams = {
   diaryText: string;
   source: 'text' | 'voice';
-  transcriptText?: string;
+  rawTranscriptText?: string;
+  cleanedText?: string;
 };
 
 export type GeneratePracticeResponse = {
-  diaryEntry: DiaryEntryRow;
-  practiceItems: PracticeItemRow[];
+  diaryEntry: {
+    id: string;
+    source: 'text' | 'voice';
+    raw_transcript_text: string;
+    cleaned_text: string;
+    created_at: string;
+  };
+  cards: TranslationCardRow[];
 };
 
 export async function generatePracticeFromDiary({
   diaryText,
   source,
-  transcriptText,
+  rawTranscriptText,
+  cleanedText,
 }: GeneratePracticeParams) {
   await ensureAnonymousSession();
 
@@ -30,7 +70,8 @@ export async function generatePracticeFromDiary({
       body: {
         diaryText,
         source,
-        transcriptText,
+        rawTranscriptText,
+        cleanedText,
       },
     }
   );
@@ -39,11 +80,79 @@ export async function generatePracticeFromDiary({
     throw await normalizeFunctionError(error);
   }
 
-  if (!data?.practiceItems?.length) {
-    throw new Error('練習文を作成できませんでした。');
+  if (!data?.cards?.length) {
+    throw new Error('英語カードを作成できませんでした。');
   }
 
-  return data;
+  return {
+    diaryEntry: data.diaryEntry,
+    cards: data.cards.map((card) => ({
+      id: card.id,
+      diaryEntryId: card.diary_entry_id,
+      sortOrder: card.sort_order,
+      japanese: card.japanese,
+      english: card.english,
+      createdAt: card.created_at,
+    })),
+  };
+}
+
+export async function listDiaryEntries() {
+  await ensureAnonymousSession();
+
+  const supabase = requireSupabaseClient();
+  const { data: entries, error: entriesError } = await supabase
+    .from('diary_entries')
+    .select('id, source, raw_transcript_text, cleaned_text, created_at')
+    .order('created_at', { ascending: false });
+
+  if (entriesError) {
+    throw entriesError;
+  }
+
+  const { data: cards, error: cardsError } = await supabase
+    .from('translation_cards')
+    .select('id, diary_entry_id, sort_order, japanese, english, created_at')
+    .order('sort_order', { ascending: true });
+
+  if (cardsError) {
+    throw cardsError;
+  }
+
+  const cardsByDiaryId = new Map<string, TranslationCard[]>();
+
+  for (const card of cards ?? []) {
+    const mappedCard = mapTranslationCard(card);
+    const diaryCards = cardsByDiaryId.get(mappedCard.diaryEntryId) ?? [];
+    diaryCards.push(mappedCard);
+    cardsByDiaryId.set(mappedCard.diaryEntryId, diaryCards);
+  }
+
+  return ((entries ?? []) as DiaryEntryRow[]).map((entry) => ({
+    id: entry.id,
+    source: entry.source,
+    transcriptText: entry.cleaned_text,
+    rawTranscriptText: entry.raw_transcript_text,
+    cleanedText: entry.cleaned_text,
+    createdAt: entry.created_at,
+    cards: cardsByDiaryId.get(entry.id) ?? [],
+  }));
+}
+
+export async function listTranslationCards() {
+  await ensureAnonymousSession();
+
+  const supabase = requireSupabaseClient();
+  const { data, error } = await supabase
+    .from('translation_cards')
+    .select('id, diary_entry_id, sort_order, japanese, english, created_at')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    throw error;
+  }
+
+  return (data ?? []).map(mapTranslationCard);
 }
 
 async function normalizeFunctionError(error: unknown) {
@@ -66,7 +175,7 @@ async function normalizeFunctionError(error: unknown) {
     return error;
   }
 
-  return new Error('練習文の作成に失敗しました。');
+  return new Error('英語カードの作成に失敗しました。');
 }
 
 function isFunctionErrorWithResponse(error: unknown): error is { context: { text: () => Promise<string> } } {
@@ -87,4 +196,15 @@ function parseJson<T>(value: string): T | null {
   } catch {
     return null;
   }
+}
+
+function mapTranslationCard(card: TranslationCardRow): TranslationCard {
+  return {
+    id: card.id,
+    diaryEntryId: card.diary_entry_id,
+    sortOrder: card.sort_order,
+    japanese: card.japanese,
+    english: card.english,
+    createdAt: card.created_at,
+  };
 }

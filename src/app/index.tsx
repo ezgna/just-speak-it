@@ -5,156 +5,51 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
-import { SymbolView } from 'expo-symbols';
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { useState } from 'react';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import {
-  ActionButton,
-  FlowSteps,
-  MetricTile,
-  Pill,
-  SectionHeader,
-  Surface,
-  useDailyPalette,
-} from '@/components/daily-to-english-ui';
+import { ActionButton, useDailyPalette } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { practiceItems, sampleDiaryText, type PracticeItem } from '@/data/daily-to-english';
-import { ensureAnonymousSession, type BackendSessionState } from '@/lib/backend/auth';
-import { generatePracticeFromDiary } from '@/lib/backend/practice';
+import {
+  generatePracticeFromDiary,
+  type TranslationCard,
+} from '@/lib/backend/practice';
 import { transcribeRecording } from '@/lib/backend/transcription';
-import type { Database } from '@/lib/supabase/database.types';
-
-type PracticeItemRow = Database['public']['Tables']['practice_items']['Row'];
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const palette = useDailyPalette();
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(audioRecorder);
-  const [diaryText, setDiaryText] = useState(sampleDiaryText);
-  const [practiceCards, setPracticeCards] = useState<PracticeItem[]>(practiceItems);
   const [isRecordingBusy, setIsRecordingBusy] = useState(false);
-  const [recordingUri, setRecordingUri] = useState<string | null>(null);
-  const [recordingError, setRecordingError] = useState<string | null>(null);
-  const [backendSession, setBackendSession] = useState<BackendSessionState>({
-    status: 'not-configured',
-    userId: null,
-  });
-  const [backendError, setBackendError] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [isGeneratingCards, setIsGeneratingCards] = useState(false);
+  const [rawTranscriptText, setRawTranscriptText] = useState<string | null>(null);
+  const [cleanedTranscriptText, setCleanedTranscriptText] = useState<string | null>(null);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
-  const [isGeneratingPractice, setIsGeneratingPractice] = useState(false);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [hasGenerated, setHasGenerated] = useState(true);
-  const [selectedId, setSelectedId] = useState(practiceItems[0].id);
-  const [answer, setAnswer] = useState("I haven't decided the details yet.");
-  const [showFeedback, setShowFeedback] = useState(true);
-  const [retryCount, setRetryCount] = useState(1);
+  const [cards, setCards] = useState<TranslationCard[]>([]);
 
-  const selectedItem = useMemo(
-    () => practiceCards.find((item) => item.id === selectedId) ?? practiceCards[0] ?? practiceItems[0],
-    [practiceCards, selectedId]
+  const isWorking = isRecordingBusy || isTranscribing || isGeneratingCards;
+  const hasTranscriptPanel = Boolean(
+    recorderState.isRecording || isTranscribing || cleanedTranscriptText || transcriptionError
   );
-
-  useEffect(() => {
-    let isMounted = true;
-
-    async function prepareBackendSession() {
-      try {
-        const session = await ensureAnonymousSession();
-
-        if (isMounted) {
-          setBackendSession(session);
-          setBackendError(null);
-        }
-      } catch (error) {
-        if (isMounted) {
-          setBackendError(error instanceof Error ? error.message : 'Supabase接続に失敗しました。');
-        }
-      }
-    }
-
-    prepareBackendSession();
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  const insets = {
-    ...safeAreaInsets,
-    bottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
-  };
-
-  async function handleGenerate() {
-    const trimmedDiaryText = diaryText.trim();
-
-    if (!trimmedDiaryText) {
-      const message = '練習文を作るには、まず日本語の日記を書いてください。';
-      setGenerationError(message);
-      Alert.alert('練習文を作れません', message);
-      return;
-    }
-
-    setIsGeneratingPractice(true);
-    setGenerationError(null);
-
-    try {
-      const source = recordingUri ? 'voice' : 'text';
-      const result = await generatePracticeFromDiary({
-        diaryText: trimmedDiaryText,
-        source,
-        transcriptText: source === 'voice' ? trimmedDiaryText : undefined,
-      });
-      const generatedCards = [...result.practiceItems]
-        .sort((a, b) => a.sort_order - b.sort_order)
-        .map(mapPracticeItemRow);
-
-      setPracticeCards(generatedCards);
-      setHasGenerated(true);
-      setSelectedId(generatedCards[0].id);
-      setAnswer('');
-      setShowFeedback(false);
-      setRetryCount(1);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '練習文の作成に失敗しました。';
-      setGenerationError(message);
-      Alert.alert('練習文を作れません', message);
-    } finally {
-      setIsGeneratingPractice(false);
-    }
-  }
-
-  function handleSelectCard(id: string) {
-    setSelectedId(id);
-    setAnswer('');
-    setShowFeedback(false);
-    setRetryCount(1);
-  }
-
-  function handleShowFeedback() {
-    setShowFeedback(true);
-  }
-
-  function handleRetry() {
-    setRetryCount((current) => current + 1);
-    setAnswer('');
-    setShowFeedback(false);
-  }
+  const hasCards = cards.length > 0;
 
   async function startRecording() {
     setIsRecordingBusy(true);
-    setRecordingError(null);
+    setRawTranscriptText(null);
+    setCleanedTranscriptText(null);
+    setTranscriptionError(null);
+    setGenerationError(null);
+    setCards([]);
 
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!permission.granted) {
-        const message = 'マイク権限がないため録音できません。';
-        setRecordingError(message);
-        Alert.alert('録音できません', message);
+        Alert.alert('録音できません', 'マイク権限がないため録音できません。');
         return;
       }
 
@@ -164,10 +59,11 @@ export default function HomeScreen() {
       });
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
-      setRecordingUri(null);
     } catch (error) {
-      const message = error instanceof Error ? error.message : '録音の開始に失敗しました。';
-      setRecordingError(message);
+      Alert.alert(
+        '録音できません',
+        error instanceof Error ? error.message : '録音の開始に失敗しました。'
+      );
     } finally {
       setIsRecordingBusy(false);
     }
@@ -175,20 +71,74 @@ export default function HomeScreen() {
 
   async function stopRecording() {
     setIsRecordingBusy(true);
-    setRecordingError(null);
+    setTranscriptionError(null);
+
+    let recordingUri: string | null = null;
 
     try {
       await audioRecorder.stop();
-      setRecordingUri(audioRecorder.uri ?? recorderState.url);
+      recordingUri = audioRecorder.uri ?? recorderState.url;
       await setAudioModeAsync({
         allowsRecording: false,
         playsInSilentMode: true,
       });
+
+      if (!recordingUri) {
+        throw new Error('録音ファイルを読み込めませんでした。もう一度録音してください。');
+      }
     } catch (error) {
-      const message = error instanceof Error ? error.message : '録音の停止に失敗しました。';
-      setRecordingError(message);
+      Alert.alert(
+        '録音を停止できません',
+        error instanceof Error ? error.message : '録音の停止に失敗しました。'
+      );
     } finally {
       setIsRecordingBusy(false);
+    }
+
+    if (recordingUri) {
+      await handleTranscription(recordingUri);
+    }
+  }
+
+  async function handleTranscription(recordingUri: string) {
+    setIsTranscribing(true);
+
+    try {
+      const transcript = await transcribeRecording(recordingUri);
+      setRawTranscriptText(transcript.rawText);
+      setCleanedTranscriptText(transcript.cleanedText);
+    } catch (error) {
+      setTranscriptionError(
+        error instanceof Error ? error.message : '文字起こしに失敗しました。'
+      );
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
+  async function handleGenerateCards() {
+    if (!cleanedTranscriptText || isGeneratingCards) {
+      return;
+    }
+
+    setIsGeneratingCards(true);
+    setGenerationError(null);
+    setCards([]);
+
+    try {
+      const result = await generatePracticeFromDiary({
+        diaryText: cleanedTranscriptText,
+        source: 'voice',
+        cleanedText: cleanedTranscriptText,
+        rawTranscriptText: rawTranscriptText ?? cleanedTranscriptText,
+      });
+      setCards(result.cards);
+    } catch (error) {
+      setGenerationError(
+        error instanceof Error ? error.message : '英語カードの作成に失敗しました。'
+      );
+    } finally {
+      setIsGeneratingCards(false);
     }
   }
 
@@ -201,311 +151,173 @@ export default function HomeScreen() {
     await startRecording();
   }
 
-  async function handleTranscribePress() {
-    if (!recordingUri) {
-      return;
-    }
-
-    setIsTranscribing(true);
-    setTranscriptionError(null);
-
-    try {
-      const transcript = await transcribeRecording(recordingUri);
-      setDiaryText(transcript);
-      setGenerationError(null);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '文字起こしに失敗しました。';
-      setTranscriptionError(message);
-      Alert.alert('文字起こしできません', message);
-    } finally {
-      setIsTranscribing(false);
-    }
-  }
-
   return (
-    <ScrollView
-      style={[styles.scrollView, { backgroundColor: palette.background }]}
-      contentInset={insets}
-      contentContainerStyle={[
-        styles.contentContainer,
+    <View
+      style={[
+        styles.screen,
         {
-          paddingTop: insets.top + Spacing.four,
-          paddingBottom: insets.bottom,
-          paddingLeft: Math.max(insets.left, Spacing.three),
-          paddingRight: Math.max(insets.right, Spacing.three),
+          backgroundColor: palette.background,
+          paddingTop: safeAreaInsets.top + Spacing.three,
+          paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
+          paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+          paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
-      <View style={styles.container}>
-        <View style={styles.hero}>
-          <View style={styles.heroText}>
-            <Pill tone="coral">自分の生活が教材になる</Pill>
-            <ThemedText type="title" style={styles.heroTitle} selectable>
-              Daily to English
-            </ThemedText>
-            <ThemedText themeColor="textSecondary" style={styles.heroDescription} selectable>
-              まず日本語で吐き出す。そこから、英語で本当に言いたい文だけを練習カードにする。
-            </ThemedText>
-          </View>
-
-          <Surface style={styles.heroPanel} tone="accent">
-            <FlowSteps steps={['話す', '分解', '練習', '言い直す']} />
-            <View style={styles.heroPanelRow}>
-              <MetricTile label="今日の抽出" value="5文" tone="teal" />
-              <MetricTile label="復習待ち" value="3枚" tone="amber" />
-            </View>
-          </Surface>
-        </View>
-
-        <Surface>
-          <SectionHeader
-            eyebrow="STEP 1"
-            title="今日のことを日本語で話す"
-            description="英語で頑張り始めない。まずは考えたことを日本語のまま残す。"
-          />
-
-          <TextInput
-            value={diaryText}
-            onChangeText={setDiaryText}
-            multiline
-            textAlignVertical="top"
-            placeholder="今日あったこと、言いたかったことを書く"
-            placeholderTextColor={palette.muted}
+      <ScrollView
+        style={styles.scrollArea}
+        contentContainerStyle={[
+          styles.scrollContent,
+          hasCards && styles.scrollContentWithCards,
+        ]}
+        showsVerticalScrollIndicator={false}>
+        {hasTranscriptPanel && (
+          <View
             style={[
-              styles.diaryInput,
+              styles.transcriptPanel,
               {
-                color: palette.text,
-                backgroundColor: palette.cardAlt,
+                backgroundColor: palette.card,
                 borderColor: palette.border,
+                boxShadow: palette.shadow,
               },
-            ]}
-          />
-
-          <View style={styles.buttonRow}>
-            <ActionButton
-              label={
-                isRecordingBusy
-                  ? '準備中'
+            ]}>
+            <View style={styles.statusRow}>
+              <View
+                style={[
+                  styles.statusDot,
+                  {
+                    backgroundColor: transcriptionError
+                      ? palette.coral
+                      : recorderState.isRecording
+                        ? palette.coral
+                        : isTranscribing
+                          ? palette.amber
+                          : palette.green,
+                  },
+                ]}
+              />
+              <ThemedText type="code" themeColor="textSecondary" selectable>
+                {transcriptionError
+                  ? 'ERROR'
                   : recorderState.isRecording
-                    ? '録音を止める'
-                    : '音声で話す'
-              }
-              icon={
-                recorderState.isRecording
-                  ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
-                  : { ios: 'mic.fill', android: 'mic', web: 'mic' }
-              }
-              variant={recorderState.isRecording ? 'secondary' : 'primary'}
-              disabled={isRecordingBusy}
-              onPress={handleRecordingPress}
-              style={styles.flexButton}
-            />
-            <ActionButton
-              label={isTranscribing ? '文字起こし中' : '文字起こしする'}
-              icon={{ ios: 'text.bubble.fill', android: 'textsms', web: 'textsms' }}
-              variant="secondary"
-              disabled={!recordingUri || isTranscribing || backendSession.status !== 'ready'}
-              onPress={handleTranscribePress}
-              style={styles.flexButton}
-            />
-            <ActionButton
-              label={isGeneratingPractice ? '生成中' : '練習文を作る'}
-              icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-              variant="secondary"
-              disabled={isGeneratingPractice || backendSession.status !== 'ready'}
-              onPress={handleGenerate}
-              style={styles.flexButton}
-            />
-          </View>
-
-          <View style={[styles.recordingStatus, { borderColor: palette.border }]}>
-            <View style={styles.statusPillRow}>
-              <Pill tone={recorderState.isRecording ? 'coral' : recordingUri ? 'green' : 'neutral'}>
-                {recorderState.isRecording ? '録音中' : recordingUri ? '録音済み' : '未録音'}
-              </Pill>
-              <Pill tone={backendSession.status === 'ready' ? 'green' : 'neutral'}>
-                {backendSession.status === 'ready' ? 'Supabase接続済み' : 'Supabase未設定'}
-              </Pill>
+                    ? `REC ${formatDuration(recorderState.durationMillis)}`
+                    : isTranscribing
+                      ? 'TRANSCRIBING'
+                      : 'TRANSCRIPT'}
+              </ThemedText>
             </View>
-            <ThemedText type="small" themeColor="textSecondary" selectable>
-              {recorderState.isRecording
-                ? `録音時間: ${formatDuration(recorderState.durationMillis)}`
-                : recordingUri
-                  ? `録音ファイル: ${recordingUri}`
-                  : '停止後に音声ファイルURIをここに表示します。'}
-            </ThemedText>
-            {backendSession.userId && (
-              <ThemedText type="small" themeColor="textSecondary" selectable>
-                {`匿名ユーザー: ${backendSession.userId.slice(0, 8)}`}
+
+            {recorderState.isRecording && (
+              <ThemedText type="subtitle" style={styles.pendingText} selectable>
+                録音中
               </ThemedText>
             )}
-            {recordingError && (
-              <ThemedText type="small" style={{ color: palette.coral }} selectable>
-                {recordingError}
-              </ThemedText>
+
+            {isTranscribing && (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={palette.primary} />
+                <ThemedText type="subtitle" style={styles.pendingText} selectable>
+                  文字起こし中
+                </ThemedText>
+              </View>
             )}
-            {backendError && (
-              <ThemedText type="small" style={{ color: palette.coral }} selectable>
-                {backendError}
-              </ThemedText>
-            )}
+
             {transcriptionError && (
-              <ThemedText type="small" style={{ color: palette.coral }} selectable>
+              <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
                 {transcriptionError}
               </ThemedText>
             )}
+
+            {cleanedTranscriptText && !isTranscribing && (
+              <>
+                <ThemedText style={styles.transcriptText} selectable>
+                  {cleanedTranscriptText}
+                </ThemedText>
+                <ActionButton
+                  label={isGeneratingCards ? '英語カードを作成中' : '英語カードを作る'}
+                  icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+                  variant="secondary"
+                  disabled={isGeneratingCards}
+                  onPress={handleGenerateCards}
+                />
+              </>
+            )}
+
+            {isGeneratingCards && (
+              <View style={styles.loadingRow}>
+                <ActivityIndicator color={palette.primary} />
+                <ThemedText type="smallBold" selectable>
+                  ネイティブ表現に分けています
+                </ThemedText>
+              </View>
+            )}
+
             {generationError && (
-              <ThemedText type="small" style={{ color: palette.coral }} selectable>
+              <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
                 {generationError}
               </ThemedText>
             )}
           </View>
-        </Surface>
+        )}
 
-        {hasGenerated && (
-          <View style={styles.gridSection}>
-            <SectionHeader
-              eyebrow="STEP 2"
-              title="AIが練習価値の高い文に分解"
-              description="日記を丸ごと翻訳せず、会話で再利用できる単位に切る。"
-            />
-
-            <View style={styles.practiceGrid}>
-              {practiceCards.map((item, index) => {
-                const selected = item.id === selectedId;
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => handleSelectCard(item.id)}
-                    style={({ pressed }) => [styles.practicePressable, pressed && styles.pressed]}>
-                    <Surface
-                      style={[
-                        styles.practiceCard,
-                        selected && {
-                          borderColor: palette.primary,
-                          backgroundColor: palette.cardAlt,
-                        },
-                      ]}>
-                      <View style={styles.cardTopRow}>
-                        <Pill tone={selected ? 'blue' : 'neutral'}>{`CARD ${index + 1}`}</Pill>
-                        {selected && (
-                          <SymbolView
-                            name={{ ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }}
-                            size={18}
-                            tintColor={palette.primary}
-                          />
-                        )}
-                      </View>
-                      <ThemedText type="smallBold" selectable>
-                        {item.japanese}
-                      </ThemedText>
-                      <ThemedText type="small" themeColor="textSecondary" selectable>
-                        {item.intent}
-                      </ThemedText>
-                      <View style={styles.patternBox}>
-                        <ThemedText type="code" style={{ color: palette.coral }} selectable>
-                          {item.patternLabel}
-                        </ThemedText>
-                        <ThemedText type="smallBold" selectable>
-                          {item.pattern}
-                        </ThemedText>
-                      </View>
-                    </Surface>
-                  </Pressable>
-                );
-              })}
-            </View>
+        {hasCards && (
+          <View style={styles.cardList}>
+            {cards.map((card, index) => (
+              <View
+                key={card.id}
+                style={[
+                  styles.translationCard,
+                  {
+                    backgroundColor: palette.card,
+                    borderColor: palette.border,
+                  },
+                ]}>
+                <View style={styles.cardNumber}>
+                  <ThemedText type="code" themeColor="textSecondary">
+                    {String(index + 1).padStart(2, '0')}
+                  </ThemedText>
+                </View>
+                <View style={styles.cardBody}>
+                  <ThemedText style={styles.japaneseText} selectable>
+                    {card.japanese}
+                  </ThemedText>
+                  <View style={[styles.divider, { backgroundColor: palette.border }]} />
+                  <ThemedText style={styles.englishText} selectable>
+                    {card.english}
+                  </ThemedText>
+                </View>
+              </View>
+            ))}
           </View>
         )}
+      </ScrollView>
 
-        {hasGenerated && (
-          <Surface style={styles.practicePanel}>
-            <SectionHeader
-              eyebrow="STEP 3"
-              title="これ英語でどう言う？"
-              description="10秒で口から出す。完璧な英文を書くより、まず出すことを優先する。"
-            />
-
-            <View style={[styles.promptBox, { backgroundColor: palette.coralSoft }]}>
-              <Pill tone="coral">日本語カード</Pill>
-              <ThemedText type="subtitle" style={styles.promptText} selectable>
-                {selectedItem.japanese}
-              </ThemedText>
-              <ThemedText type="small" style={{ color: palette.coral }} selectable>
-                {selectedItem.shortPhrase}
-              </ThemedText>
-            </View>
-
-            <TextInput
-              value={answer}
-              onChangeText={setAnswer}
-              multiline
-              textAlignVertical="top"
-              placeholder="英語で言ってみる / 書いてみる"
-              placeholderTextColor={palette.muted}
-              style={[
-                styles.answerInput,
-                {
-                  color: palette.text,
-                  backgroundColor: palette.cardAlt,
-                  borderColor: palette.border,
-                },
-              ]}
-            />
-
-            <View style={styles.buttonRow}>
-              <ActionButton
-                label="添削を見る"
-                icon={{ ios: 'checkmark.seal.fill', android: 'task_alt', web: 'task_alt' }}
-                onPress={handleShowFeedback}
-                style={styles.flexButton}
-              />
-              <ActionButton
-                label={`言い直す ${retryCount}回目`}
-                icon={{ ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' }}
-                variant="secondary"
-                onPress={handleRetry}
-                style={styles.flexButton}
-              />
-            </View>
-
-            {showFeedback && (
-              <View style={styles.feedbackGrid}>
-                <Surface style={styles.feedbackCard} tone="soft">
-                  <Pill tone="neutral">自分の英語</Pill>
-                  <ThemedText selectable>
-                    {answer.trim() || "I haven't decided the details yet."}
-                  </ThemedText>
-                </Surface>
-
-                <Surface style={styles.feedbackCard} tone="accent">
-                  <Pill tone="teal">自然な英語</Pill>
-                  <ThemedText type="smallBold" selectable>
-                    {selectedItem.naturalEnglish}
-                  </ThemedText>
-                </Surface>
-
-                <Surface style={styles.feedbackCard}>
-                  <Pill tone="green">簡単に言える英語</Pill>
-                  <ThemedText selectable>{selectedItem.simpleEnglish}</ThemedText>
-                </Surface>
-
-                <Surface style={styles.feedbackCard}>
-                  <Pill tone="amber">次の復習</Pill>
-                  <ThemedText selectable>{selectedItem.nextReview}</ThemedText>
-                  <View style={styles.stuckList}>
-                    {selectedItem.stuckPoints.map((point) => (
-                      <Pill key={point} tone="neutral">
-                        {point}
-                      </Pill>
-                    ))}
-                  </View>
-                </Surface>
-              </View>
-            )}
-          </Surface>
-        )}
+      <View style={styles.buttonDock}>
+        <ActionButton
+          label={
+            isTranscribing
+              ? '文字起こし中'
+              : isGeneratingCards
+                ? '作成中'
+                : isRecordingBusy
+                  ? '準備中'
+                  : recorderState.isRecording
+                    ? '録音を止める'
+                    : cleanedTranscriptText
+                      ? 'もう一度話す'
+                      : '音声で話す'
+          }
+          icon={
+            recorderState.isRecording
+              ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
+              : { ios: 'mic.fill', android: 'mic', web: 'mic' }
+          }
+          variant={recorderState.isRecording ? 'secondary' : 'primary'}
+          disabled={isWorking}
+          onPress={handleRecordingPress}
+          style={styles.recordButton}
+        />
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
@@ -516,147 +328,102 @@ function formatDuration(durationMillis: number) {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
-function mapPracticeItemRow(item: PracticeItemRow): PracticeItem {
-  return {
-    id: item.id,
-    japanese: item.japanese,
-    intent: item.intent,
-    patternLabel: item.pattern_label,
-    pattern: item.pattern,
-    naturalEnglish: item.natural_english,
-    simpleEnglish: item.simple_english,
-    shortPhrase: item.short_phrase,
-    stuckPoints: item.stuck_points,
-    nextReview: '明日',
-  };
-}
-
 const styles = StyleSheet.create({
-  scrollView: {
+  screen: {
     flex: 1,
-  },
-  contentContainer: {
     alignItems: 'center',
+    gap: Spacing.three,
   },
-  container: {
+  scrollArea: {
+    flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
-    gap: Spacing.four,
   },
-  hero: {
-    gap: Spacing.four,
-  },
-  heroText: {
-    gap: Spacing.two,
-  },
-  heroTitle: {
-    fontSize: 44,
-    lineHeight: 48,
-  },
-  heroDescription: {
-    maxWidth: 620,
-  },
-  heroPanel: {
-    padding: Spacing.three,
-  },
-  heroPanelRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.three,
-  },
-  diaryInput: {
-    minHeight: 150,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    padding: Spacing.three,
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: 500,
-  },
-  answerInput: {
-    minHeight: 104,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    padding: Spacing.three,
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: 500,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  flexButton: {
+  scrollContent: {
     flexGrow: 1,
+    justifyContent: 'center',
+    gap: Spacing.three,
+    paddingVertical: Spacing.one,
   },
-  recordingStatus: {
+  scrollContentWithCards: {
+    justifyContent: 'flex-start',
+  },
+  transcriptPanel: {
+    width: '100%',
+    minHeight: 220,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 18,
+    borderRadius: 28,
     borderCurve: 'continuous',
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  statusPillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  gridSection: {
+    padding: Spacing.four,
     gap: Spacing.three,
   },
-  practiceGrid: {
+  statusRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.three,
-  },
-  practicePressable: {
-    flexGrow: 1,
-    flexBasis: 260,
-  },
-  practiceCard: {
-    minHeight: 190,
-  },
-  cardTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
     gap: Spacing.two,
   },
-  patternBox: {
-    gap: Spacing.one,
+  statusDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 999,
   },
-  practicePanel: {
-    marginBottom: Spacing.three,
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
   },
-  promptBox: {
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  promptText: {
+  pendingText: {
     fontSize: 28,
     lineHeight: 36,
   },
-  feedbackGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  transcriptText: {
+    fontSize: 21,
+    lineHeight: 32,
+    fontWeight: 600,
+  },
+  errorText: {
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: 600,
+  },
+  cardList: {
     gap: Spacing.three,
   },
-  feedbackCard: {
-    flexGrow: 1,
-    flexBasis: 260,
+  translationCard: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+    borderCurve: 'continuous',
     padding: Spacing.three,
-  },
-  stuckList: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    gap: Spacing.three,
+  },
+  cardNumber: {
+    width: 28,
+    alignItems: 'center',
+    paddingTop: Spacing.one,
+  },
+  cardBody: {
+    flex: 1,
     gap: Spacing.two,
   },
-  pressed: {
-    opacity: 0.75,
+  japaneseText: {
+    fontSize: 17,
+    lineHeight: 26,
+    fontWeight: 600,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+  },
+  englishText: {
+    fontSize: 20,
+    lineHeight: 30,
+    fontWeight: 700,
+  },
+  buttonDock: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+  },
+  recordButton: {
+    minHeight: 56,
   },
 });

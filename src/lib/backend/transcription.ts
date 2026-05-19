@@ -6,7 +6,8 @@ import { ensureAnonymousSession } from '@/lib/backend/auth';
 import { requireSupabaseClient, supabasePublishableKey, supabaseUrl } from '@/lib/supabase/client';
 
 type TranscriptionResponse = {
-  text: string;
+  rawText: string;
+  cleanedText: string;
 };
 
 export async function transcribeRecording(recordingUri: string) {
@@ -64,11 +65,11 @@ export async function transcribeRecording(recordingUri: string) {
     throw new Error(data?.error ?? `文字起こしAPIが${response.status}を返しました。`);
   }
 
-  if (!data?.text) {
+  if (!data?.cleanedText) {
     throw new Error('文字起こし結果が空でした。');
   }
 
-  return data.text;
+  return data;
 }
 
 function parseJson<T>(value: string): T | null {

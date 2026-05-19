@@ -22,8 +22,11 @@ export default function AppTabs() {
           <TabTrigger name="home" href="/" asChild>
             <TabButton>今日</TabButton>
           </TabTrigger>
-          <TabTrigger name="explore" href="/explore" asChild>
-            <TabButton>復習</TabButton>
+          <TabTrigger name="diary" href="/diary" asChild>
+            <TabButton>日記</TabButton>
+          </TabTrigger>
+          <TabTrigger name="english" href="/english" asChild>
+            <TabButton>英語</TabButton>
           </TabTrigger>
         </CustomTabList>
       </TabList>

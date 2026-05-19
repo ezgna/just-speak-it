@@ -386,9 +386,6 @@ verify_jwt = true
 [functions.generate-practice]
 verify_jwt = true
 
-[functions.grade-answer]
-verify_jwt = true
-
 [analytics]
 enabled = true
 port = 54327
