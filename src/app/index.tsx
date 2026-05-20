@@ -6,7 +6,7 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import { useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionButton, useDailyPalette } from '@/components/daily-to-english-ui';
@@ -16,6 +16,7 @@ import {
   generatePracticeFromDiary,
   type TranslationCard,
 } from '@/lib/backend/practice';
+import { notifyPracticeChanged } from '@/lib/practice-refresh';
 import { transcribeRecording } from '@/lib/backend/transcription';
 
 export default function HomeScreen() {
@@ -34,7 +35,11 @@ export default function HomeScreen() {
 
   const isWorking = isRecordingBusy || isTranscribing || isGeneratingCards;
   const hasTranscriptPanel = Boolean(
-    recorderState.isRecording || isTranscribing || cleanedTranscriptText || transcriptionError
+    recorderState.isRecording ||
+      isTranscribing ||
+      cleanedTranscriptText !== null ||
+      rawTranscriptText ||
+      transcriptionError
   );
   const hasCards = cards.length > 0;
 
@@ -117,7 +122,9 @@ export default function HomeScreen() {
   }
 
   async function handleGenerateCards() {
-    if (!cleanedTranscriptText || isGeneratingCards) {
+    const diaryText = cleanedTranscriptText?.trim() ?? '';
+
+    if (!diaryText || isGeneratingCards) {
       return;
     }
 
@@ -127,12 +134,13 @@ export default function HomeScreen() {
 
     try {
       const result = await generatePracticeFromDiary({
-        diaryText: cleanedTranscriptText,
+        diaryText,
         source: 'voice',
-        cleanedText: cleanedTranscriptText,
-        rawTranscriptText: rawTranscriptText ?? cleanedTranscriptText,
+        cleanedText: diaryText,
+        rawTranscriptText: rawTranscriptText ?? diaryText,
       });
       setCards(result.cards);
+      notifyPracticeChanged();
     } catch (error) {
       setGenerationError(
         error instanceof Error ? error.message : '英語カードの作成に失敗しました。'
@@ -151,13 +159,19 @@ export default function HomeScreen() {
     await startRecording();
   }
 
+  function handleTranscriptChange(nextText: string) {
+    setCleanedTranscriptText(nextText);
+    setGenerationError(null);
+    setCards([]);
+  }
+
   return (
     <View
       style={[
         styles.screen,
         {
           backgroundColor: palette.background,
-          paddingTop: safeAreaInsets.top + Spacing.three,
+          paddingTop: safeAreaInsets.top,
           paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
@@ -227,16 +241,31 @@ export default function HomeScreen() {
               </ThemedText>
             )}
 
-            {cleanedTranscriptText && !isTranscribing && (
+            {cleanedTranscriptText !== null && !isTranscribing && (
               <>
-                <ThemedText style={styles.transcriptText} selectable>
-                  {cleanedTranscriptText}
-                </ThemedText>
+                <TextInput
+                  value={cleanedTranscriptText}
+                  editable={!isGeneratingCards}
+                  multiline
+                  textAlignVertical="top"
+                  placeholder="文字起こし"
+                  placeholderTextColor={palette.textSecondary}
+                  selectionColor={palette.primary}
+                  style={[
+                    styles.transcriptInput,
+                    {
+                      backgroundColor: palette.cardAlt,
+                      borderColor: palette.border,
+                      color: palette.text,
+                    },
+                  ]}
+                  onChangeText={handleTranscriptChange}
+                />
                 <ActionButton
                   label={isGeneratingCards ? '英語カードを作成中' : '英語カードを作る'}
                   icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
                   variant="secondary"
-                  disabled={isGeneratingCards}
+                  disabled={isGeneratingCards || !cleanedTranscriptText.trim()}
                   onPress={handleGenerateCards}
                 />
               </>
@@ -302,7 +331,7 @@ export default function HomeScreen() {
                   ? '準備中'
                   : recorderState.isRecording
                     ? '録音を止める'
-                    : cleanedTranscriptText
+                    : cleanedTranscriptText !== null
                       ? 'もう一度話す'
                       : '音声で話す'
           }
@@ -376,7 +405,12 @@ const styles = StyleSheet.create({
     fontSize: 28,
     lineHeight: 36,
   },
-  transcriptText: {
+  transcriptInput: {
+    minHeight: 160,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    padding: Spacing.three,
     fontSize: 21,
     lineHeight: 32,
     fontWeight: 600,

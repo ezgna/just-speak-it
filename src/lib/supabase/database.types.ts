@@ -8,6 +8,8 @@ export type Database = {
           id: string;
           user_id: string;
           source: 'text' | 'voice';
+          title: string;
+          summary_points: Json;
           raw_transcript_text: string;
           cleaned_text: string;
           created_at: string;
@@ -17,6 +19,8 @@ export type Database = {
           id?: string;
           user_id: string;
           source?: 'text' | 'voice';
+          title?: string;
+          summary_points?: Json;
           raw_transcript_text: string;
           cleaned_text: string;
           created_at?: string;
@@ -26,6 +30,8 @@ export type Database = {
           id?: string;
           user_id?: string;
           source?: 'text' | 'voice';
+          title?: string;
+          summary_points?: Json;
           raw_transcript_text?: string;
           cleaned_text?: string;
           created_at?: string;
