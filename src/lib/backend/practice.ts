@@ -81,6 +81,7 @@ export type GeneratePracticeResponse = {
     created_at: string;
   };
   cards: TranslationCardRow[];
+  reused?: boolean;
 };
 
 export async function generatePracticeFromDiary({
@@ -132,6 +133,7 @@ export async function listDiaryEntries() {
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
     .select('id, source, title, summary_points, raw_transcript_text, cleaned_text, created_at')
+    .eq('generation_status', 'completed')
     .order('created_at', { ascending: false });
 
   if (entriesError) {
@@ -173,6 +175,7 @@ export async function listTranslationCardGroups() {
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
     .select('id, source, title, summary_points, created_at')
+    .eq('generation_status', 'completed')
     .order('created_at', { ascending: false });
 
   if (entriesError) {

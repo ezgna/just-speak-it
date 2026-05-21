@@ -45,7 +45,7 @@ export default {
 
     const transcriptionForm = new FormData();
     transcriptionForm.append('file', audio, audio.name || 'daily-recording.m4a');
-    transcriptionForm.append('model', Deno.env.get('OPENAI_TRANSCRIBE_MODEL') ?? 'gpt-4o-mini-transcribe');
+    transcriptionForm.append('model', Deno.env.get('OPENAI_TRANSCRIBE_MODEL') ?? 'gpt-4o-transcribe');
     transcriptionForm.append('language', 'ja');
 
     const transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {

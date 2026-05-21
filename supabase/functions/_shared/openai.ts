@@ -28,7 +28,7 @@ export async function createOpenAIJsonResponse<T>({
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5.4-nano',
+      model: Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5.4-mini',
       instructions,
       input,
       max_output_tokens: maxOutputTokens,

@@ -5,7 +5,8 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
-import { useState } from 'react';
+import { router } from 'expo-router';
+import { useRef, useState } from 'react';
 import { ActivityIndicator, Alert, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -32,6 +33,7 @@ export default function HomeScreen() {
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [cards, setCards] = useState<TranslationCard[]>([]);
+  const generationInFlightRef = useRef(false);
 
   const isWorking = isRecordingBusy || isTranscribing || isGeneratingCards;
   const hasTranscriptPanel = Boolean(
@@ -124,10 +126,11 @@ export default function HomeScreen() {
   async function handleGenerateCards() {
     const diaryText = cleanedTranscriptText?.trim() ?? '';
 
-    if (!diaryText || isGeneratingCards) {
+    if (!diaryText || isGeneratingCards || generationInFlightRef.current || hasCards) {
       return;
     }
 
+    generationInFlightRef.current = true;
     setIsGeneratingCards(true);
     setGenerationError(null);
     setCards([]);
@@ -146,6 +149,7 @@ export default function HomeScreen() {
         error instanceof Error ? error.message : '英語カードの作成に失敗しました。'
       );
     } finally {
+      generationInFlightRef.current = false;
       setIsGeneratingCards(false);
     }
   }
@@ -245,7 +249,7 @@ export default function HomeScreen() {
               <>
                 <TextInput
                   value={cleanedTranscriptText}
-                  editable={!isGeneratingCards}
+                  editable={!isGeneratingCards && !hasCards}
                   multiline
                   textAlignVertical="top"
                   placeholder="文字起こし"
@@ -261,13 +265,44 @@ export default function HomeScreen() {
                   ]}
                   onChangeText={handleTranscriptChange}
                 />
-                <ActionButton
-                  label={isGeneratingCards ? '英語カードを作成中' : '英語カードを作る'}
-                  icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-                  variant="secondary"
-                  disabled={isGeneratingCards || !cleanedTranscriptText.trim()}
-                  onPress={handleGenerateCards}
-                />
+                {hasCards ? (
+                  <View style={styles.generationComplete}>
+                    <View style={styles.generationCompleteText}>
+                      <ThemedText type="smallBold" selectable>
+                        英語カードを作成しました
+                      </ThemedText>
+                      <ThemedText type="small" themeColor="textSecondary" selectable>
+                        {cards.length}枚のカードを保存済み
+                      </ThemedText>
+                    </View>
+                    <View style={styles.generationCompleteActions}>
+                      <ActionButton
+                        label="英語タブで見る"
+                        icon={{ ios: 'text.book.closed.fill', android: 'menu_book', web: 'menu_book' }}
+                        variant="secondary"
+                        onPress={() => router.push('/english')}
+                      />
+                      <ActionButton
+                        label="復習する"
+                        icon={{
+                          ios: 'rectangle.stack.fill',
+                          android: 'view_carousel',
+                          web: 'view_carousel',
+                        }}
+                        variant="primary"
+                        onPress={() => router.push('/flashcards')}
+                      />
+                    </View>
+                  </View>
+                ) : (
+                  <ActionButton
+                    label={isGeneratingCards ? '英語カードを作成中' : '英語カードを作る'}
+                    icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+                    variant="secondary"
+                    disabled={isGeneratingCards || !cleanedTranscriptText.trim()}
+                    onPress={handleGenerateCards}
+                  />
+                )}
               </>
             )}
 
@@ -414,6 +449,15 @@ const styles = StyleSheet.create({
     fontSize: 21,
     lineHeight: 32,
     fontWeight: 600,
+  },
+  generationComplete: {
+    gap: Spacing.three,
+  },
+  generationCompleteText: {
+    gap: Spacing.one,
+  },
+  generationCompleteActions: {
+    gap: Spacing.two,
   },
   errorText: {
     fontSize: 16,

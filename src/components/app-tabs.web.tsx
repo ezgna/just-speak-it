@@ -28,6 +28,9 @@ export default function AppTabs() {
           <TabTrigger name="english" href="/english" asChild>
             <TabButton>英語</TabButton>
           </TabTrigger>
+          <TabTrigger name="flashcards" href="/flashcards" asChild>
+            <TabButton>復習</TabButton>
+          </TabTrigger>
         </CustomTabList>
       </TabList>
     </Tabs>

@@ -12,6 +12,9 @@ export type Database = {
           summary_points: Json;
           raw_transcript_text: string;
           cleaned_text: string;
+          content_hash: string;
+          generation_status: 'processing' | 'completed' | 'failed';
+          generation_error: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -23,6 +26,9 @@ export type Database = {
           summary_points?: Json;
           raw_transcript_text: string;
           cleaned_text: string;
+          content_hash: string;
+          generation_status?: 'processing' | 'completed' | 'failed';
+          generation_error?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -34,6 +40,9 @@ export type Database = {
           summary_points?: Json;
           raw_transcript_text?: string;
           cleaned_text?: string;
+          content_hash?: string;
+          generation_status?: 'processing' | 'completed' | 'failed';
+          generation_error?: string | null;
           created_at?: string;
           updated_at?: string;
         };
