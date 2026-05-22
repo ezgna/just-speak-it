@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ActionButton, useDailyPalette } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
+import { GlideButton } from '@/components/ui/glide-button';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import {
   generatePracticeFromDiary,
@@ -182,12 +183,12 @@ export default function HomeScreen() {
         },
       ]}>
       <View style={styles.labEntry}>
-        <ActionButton
+        <GlideButton
           label="実験室"
+          caption="design lab"
           icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-          variant="secondary"
+          tone="mint"
           onPress={() => router.push('/design-lab')}
-          style={styles.labButton}
         />
       </View>
 
@@ -416,9 +417,6 @@ const styles = StyleSheet.create({
   labEntry: {
     width: '100%',
     maxWidth: MaxContentWidth,
-  },
-  labButton: {
-    minHeight: 58,
   },
   scrollContent: {
     flexGrow: 1,
