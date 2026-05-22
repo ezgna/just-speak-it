@@ -31,6 +31,9 @@ export default function AppTabs() {
           <TabTrigger name="flashcards" href="/flashcards" asChild>
             <TabButton>復習</TabButton>
           </TabTrigger>
+          <TabTrigger name="flashcards-lab" href="/flashcards-lab" asChild>
+            <TabButton>実験</TabButton>
+          </TabTrigger>
         </CustomTabList>
       </TabList>
     </Tabs>
@@ -75,9 +78,10 @@ const styles = StyleSheet.create({
   },
   innerContainer: {
     paddingVertical: Spacing.two,
-    paddingHorizontal: Spacing.five,
+    paddingHorizontal: Spacing.three,
     borderRadius: Spacing.five,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     flexGrow: 1,
     gap: Spacing.two,
@@ -88,6 +92,9 @@ const styles = StyleSheet.create({
   },
   tabsWrapper: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    flexShrink: 1,
     gap: Spacing.two,
   },
   pressed: {
