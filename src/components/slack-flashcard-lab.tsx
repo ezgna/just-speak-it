@@ -1,6 +1,6 @@
 import { SymbolView } from 'expo-symbols';
 import * as Speech from 'expo-speech';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -35,7 +35,6 @@ import {
 import {
   flattenTranslationCardGroups,
   formatPracticeDate,
-  formatPracticeSource,
   StatusPriority,
   type PracticeCard,
 } from '@/lib/practice-cards';
@@ -52,6 +51,10 @@ type UndoEntry = {
 };
 
 type PendingDismissals = Record<string, { dismissedAt: string }>;
+type PendingStatusUpdate = {
+  cardId: string;
+  status: CardLearningStatus;
+};
 
 const CancelReturnSpringConfig = {
   damping: 30,
@@ -78,7 +81,9 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   const promotionOwnerCardId = useSharedValue<string | null>(null);
   const trailingPromotionOwnerCardId = useSharedValue<string | null>(null);
   const decisionOwnerCardId = useSharedValue<string | null>(null);
+  const pendingStatusUpdatesRef = useRef<PendingStatusUpdate[]>([]);
   const [pendingDismissals, setPendingDismissals] = useState<PendingDismissals>({});
+  const [pendingStatusUpdates, setPendingStatusUpdates] = useState<PendingStatusUpdate[]>([]);
   const [frontPinnedCard, setFrontPinnedCard] = useState<PracticeCard | null>(null);
   const [isAnswerVisible, setIsAnswerVisible] = useState(false);
   const [visualQueue, setVisualQueue] = useState<PracticeCard[] | null>(null);
@@ -176,6 +181,24 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
     trailingPromotionOwnerCardId,
   ]);
 
+  const persistStatusUpdates = useCallback((pendingUpdates: PendingStatusUpdate[]) => {
+    for (const pendingUpdate of pendingUpdates) {
+      setCardStatus(pendingUpdate.cardId, pendingUpdate.status);
+    }
+  }, [setCardStatus]);
+
+  useEffect(() => {
+    pendingStatusUpdatesRef.current = pendingStatusUpdates;
+  }, [pendingStatusUpdates]);
+
+  useEffect(() => {
+    return () => {
+      const updatesToPersist = pendingStatusUpdatesRef.current;
+      pendingStatusUpdatesRef.current = [];
+      persistStatusUpdates(updatesToPersist);
+    };
+  }, [persistStatusUpdates]);
+
   useEffect(() => {
     if (pendingVisualQueueRelease !== 0) {
       return;
@@ -197,6 +220,12 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
         resetCardPosition();
         setVisualQueue(null);
         setPendingVisualQueueRelease(0);
+        requestAnimationFrame(() => {
+          const updatesToPersist = pendingStatusUpdatesRef.current;
+          pendingStatusUpdatesRef.current = [];
+          setPendingStatusUpdates([]);
+          persistStatusUpdates(updatesToPersist);
+        });
       });
     });
 
@@ -204,7 +233,11 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       cancelAnimationFrame(firstFrame);
       cancelAnimationFrame(secondFrame);
     };
-  }, [pendingVisualQueueRelease, resetCardPosition]);
+  }, [
+    pendingVisualQueueRelease,
+    persistStatusUpdates,
+    resetCardPosition,
+  ]);
 
   const handleToggleAnswerPress = useCallback(() => {
     setIsAnswerVisible((currentValue) => !currentValue);
@@ -229,8 +262,11 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       const nextVisualQueue = displayQueue
         .filter((card) => card.id !== activeCard.id)
         .slice(0, VisibleCardCount);
-
       unstable_batchedUpdates(() => {
+        setPendingStatusUpdates((currentUpdates) => [
+          ...currentUpdates.filter((update) => update.cardId !== activeCard.id),
+          { cardId: activeCard.id, status },
+        ]);
         setVisualQueue(nextVisualQueue);
         setPendingVisualQueueRelease((currentValue) => currentValue + 1);
         setUndoStack((currentStack) => [
@@ -247,10 +283,9 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
         }));
         setFrontPinnedCard(null);
         setIsAnswerVisible(false);
-        setCardStatus(activeCard.id, status);
       });
     },
-    [activeCard, cardStatuses, displayQueue, resetCardPosition, setCardStatus]
+    [activeCard, cardStatuses, displayQueue, resetCardPosition]
   );
 
   const handleUndoPress = useCallback(() => {
@@ -263,6 +298,12 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
     const restoredCard = cardsById.get(undoEntry.cardId) ?? undoEntry.card;
 
     unstable_batchedUpdates(() => {
+      pendingStatusUpdatesRef.current = pendingStatusUpdatesRef.current.filter(
+        (update) => update.cardId !== undoEntry.cardId
+      );
+      setPendingStatusUpdates((currentUpdates) =>
+        currentUpdates.filter((update) => update.cardId !== undoEntry.cardId)
+      );
       resetCardPosition();
       setVisualQueue(null);
       setPendingVisualQueueRelease(0);
@@ -512,7 +553,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   );
 }
 
-function SlackCardLayer({
+const SlackCardLayer = memo(function SlackCardLayer({
   card,
   cardHeight,
   cardWidth,
@@ -552,16 +593,6 @@ function SlackCardLayer({
 
     if (position === 0) {
       return {
-        backgroundColor: interpolateColor(
-          activeX,
-          [-swipeThreshold, 0, swipeThreshold],
-          [LabColors.keepOverlayRim, LabColors.white, LabColors.readOverlayRim]
-        ),
-        borderColor: interpolateColor(
-          activeX,
-          [-swipeThreshold, 0, swipeThreshold],
-          [LabColors.keepOverlayRim, LabColors.white, LabColors.readOverlayRim]
-        ),
         transform: [
           { translateX: activeX },
           { translateY: activeY },
@@ -678,7 +709,7 @@ function SlackCardLayer({
       </View>
     </Animated.View>
   );
-}
+});
 
 function LabHeader({
   dueCount,
@@ -727,7 +758,7 @@ function LabHeader({
   );
 }
 
-function SlackCardFace({
+const SlackCardFace = memo(function SlackCardFace({
   card,
   isAnswerVisible,
   isPreview = false,
@@ -739,7 +770,6 @@ function SlackCardFace({
   onToggleAnswer?: () => void;
 }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const sideLabel = isAnswerVisible ? 'English' : '日本語';
   const flipAccessibilityLabel = isAnswerVisible ? '日本語を表示する' : '英語を表示する';
 
   useEffect(() => {
@@ -784,86 +814,34 @@ function SlackCardFace({
   return (
     <View style={styles.cardFace}>
       <View style={styles.cardContent}>
-        <View style={styles.cardHeader}>
-          <View style={styles.cardTitleBlock}>
-            <ThemedText style={styles.cardEyebrow} selectable>
-              フラッシュカード
-            </ThemedText>
-            <ThemedText style={styles.cardTitle} numberOfLines={2} selectable>
-              {card.diaryTitle}
-            </ThemedText>
-          </View>
-          <View style={[styles.sideBadge, isAnswerVisible ? styles.answerBadge : styles.promptBadge]}>
-            <ThemedText
-              style={[
-                styles.sideBadgeText,
-                { color: isAnswerVisible ? LabColors.green : LabColors.keepBlue },
-              ]}>
-              {sideLabel}
-            </ThemedText>
-          </View>
-        </View>
+        <View style={styles.cardTop}>
+          <View style={styles.cardTopText}>
+            <View style={styles.cardHeader}>
+              <ThemedText style={styles.cardTitle} numberOfLines={2} selectable>
+                {card.diaryTitle}
+              </ThemedText>
+            </View>
 
-        <View style={styles.metaRow}>
-          <View style={styles.metaPill}>
-            <SymbolView
-              name={{
-                ios: 'calendar',
-                android: 'calendar_today',
-                web: 'calendar_today',
-              }}
-              size={13}
-              tintColor={LabColors.subtleText}
-            />
-            <ThemedText style={styles.metaText} numberOfLines={1} selectable>
-              {formatPracticeDate(card.diaryCreatedAt)}
-            </ThemedText>
+            <View style={styles.metaRow}>
+              <View style={styles.metaPill}>
+                <SymbolView
+                  name={{
+                    ios: 'calendar',
+                    android: 'calendar_today',
+                    web: 'calendar_today',
+                  }}
+                  size={13}
+                  tintColor={LabColors.subtleText}
+                />
+                <ThemedText style={styles.metaText} numberOfLines={1} selectable>
+                  {formatPracticeDate(card.diaryCreatedAt)}
+                </ThemedText>
+              </View>
+            </View>
           </View>
-          <View style={styles.metaPill}>
-            <SymbolView
-              name={{
-                ios: card.source === 'voice' ? 'waveform' : 'text.alignleft',
-                android: card.source === 'voice' ? 'graphic_eq' : 'notes',
-                web: card.source === 'voice' ? 'graphic_eq' : 'notes',
-              }}
-              size={13}
-              tintColor={LabColors.subtleText}
-            />
-            <ThemedText style={styles.metaText} numberOfLines={1} selectable>
-              {formatPracticeSource(card.source)}
-            </ThemedText>
-          </View>
-        </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={flipAccessibilityLabel}
-          disabled={isPreview}
-          onPress={onToggleAnswer}
-          style={({ pressed }) => [
-            styles.promptPanel,
-            {
-              borderColor: isAnswerVisible ? LabColors.answerBorder : LabColors.promptBorder,
-              backgroundColor: pressed ? LabColors.cardPressed : LabColors.cardSoft,
-            },
-          ]}>
-          <ThemedText
-            style={isAnswerVisible ? styles.answerText : styles.promptText}
-            numberOfLines={isAnswerVisible ? 7 : 8}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
-            selectable>
-            {isAnswerVisible ? card.english : card.japanese}
-          </ThemedText>
-        </Pressable>
-
-        <View style={styles.cardFooter}>
-          <View style={styles.footerDivider} />
-          <View style={styles.footerContent}>
-            <ThemedText style={styles.footerLabel} selectable>
-              {isAnswerVisible ? '裏面' : '表面'}
-            </ThemedText>
-            {!isPreview && isAnswerVisible && (
+          <View style={styles.cardTopActionSlot}>
+            {!isPreview && isAnswerVisible ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="英語を読み上げる"
@@ -886,13 +864,30 @@ function SlackCardFace({
                   tintColor={isSpeaking ? LabColors.white : LabColors.text}
                 />
               </Pressable>
-            )}
+            ) : null}
           </View>
         </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={flipAccessibilityLabel}
+          disabled={isPreview}
+          onPress={onToggleAnswer}
+          style={styles.answerTouchArea}>
+          <ThemedText
+            style={isAnswerVisible ? styles.answerText : styles.promptText}
+            numberOfLines={isAnswerVisible ? 7 : 8}
+            adjustsFontSizeToFit
+            minimumFontScale={0.7}
+            selectable>
+            {isAnswerVisible ? card.english : card.japanese}
+          </ThemedText>
+        </Pressable>
+
       </View>
     </View>
   );
-}
+});
 
 function DecisionButton({
   label,
@@ -1066,18 +1061,10 @@ const LabColors = {
   text: '#1D1C1D',
   mutedText: '#616061',
   subtleText: '#717274',
-  line: '#E8E2EA',
   cardTint: '#F4F4F4',
-  cardSoft: '#FAFAFA',
-  cardPressed: '#F2F2F2',
-  promptBorder: '#DFD9E3',
-  answerBorder: '#D4E8DD',
-  keepBlue: '#2D6FB5',
   keepOverlay: '#3678BD',
-  keepOverlayRim: '#4683C2',
   green: '#2E8B62',
   readOverlay: '#2F8B61',
-  readOverlayRim: '#40946E',
 };
 
 const styles = StyleSheet.create({
@@ -1148,7 +1135,6 @@ const styles = StyleSheet.create({
   },
   cardLayer: {
     position: 'absolute',
-    borderWidth: 1.5,
     borderRadius: 34,
     borderCurve: 'continuous',
     backgroundColor: LabColors.white,
@@ -1175,7 +1161,22 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
+  },
+  cardTop: {
+    minHeight: 72,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: Spacing.three,
+  },
+  cardTopText: {
+    flex: 1,
+    gap: Spacing.two,
+  },
+  cardTopActionSlot: {
+    width: 40,
+    minHeight: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   cardHeader: {
     flexDirection: 'row',
@@ -1183,42 +1184,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: Spacing.three,
   },
-  cardTitleBlock: {
-    flex: 1,
-    gap: Spacing.one,
-  },
-  cardEyebrow: {
-    color: LabColors.subtleText,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: 800,
-  },
   cardTitle: {
+    flex: 1,
     color: LabColors.text,
     fontSize: 20,
     lineHeight: 27,
-    fontWeight: 900,
-  },
-  sideBadge: {
-    minWidth: 76,
-    minHeight: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 17,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: Spacing.two,
-  },
-  promptBadge: {
-    backgroundColor: 'rgba(45, 111, 181, 0.1)',
-    borderColor: 'rgba(45, 111, 181, 0.22)',
-  },
-  answerBadge: {
-    backgroundColor: 'rgba(46, 139, 98, 0.12)',
-    borderColor: 'rgba(46, 139, 98, 0.24)',
-  },
-  sideBadgeText: {
-    fontSize: 13,
-    lineHeight: 18,
     fontWeight: 900,
   },
   metaRow: {
@@ -1243,13 +1213,10 @@ const styles = StyleSheet.create({
     lineHeight: 16,
     fontWeight: 700,
   },
-  promptPanel: {
+  answerTouchArea: {
     flex: 1,
     justifyContent: 'center',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 24,
-    borderCurve: 'continuous',
-    padding: Spacing.three,
+    paddingTop: Spacing.three,
   },
   promptText: {
     color: LabColors.text,
@@ -1262,26 +1229,6 @@ const styles = StyleSheet.create({
     fontSize: 30,
     lineHeight: 40,
     fontWeight: 900,
-  },
-  cardFooter: {
-    gap: Spacing.two,
-  },
-  footerDivider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: LabColors.line,
-  },
-  footerContent: {
-    minHeight: 40,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  footerLabel: {
-    color: LabColors.subtleText,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: 800,
   },
   soundButton: {
     width: 40,
