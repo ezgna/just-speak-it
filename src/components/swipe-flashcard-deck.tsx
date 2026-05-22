@@ -47,9 +47,14 @@ type SwipeFlashcardDeckProps = {
 
 type SwipeUndoEntry = {
   cardId: string;
-  cardIndex: number;
+  card: PracticeCard;
   previousProgress: CardLearningProgress | undefined;
 };
+
+type PendingDismissal = {
+  dismissedAt: string;
+};
+type PendingDismissals = Record<string, PendingDismissal>;
 
 const SpringConfig = {
   damping: 18,
@@ -57,20 +62,19 @@ const SpringConfig = {
 };
 const FeedbackResetDuration = 240;
 const PromotionDuration = 170;
+const VisibleCardCount = 2;
 
 export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProps) {
   const { width } = useWindowDimensions();
   const palette = useDailyPalette();
   const { cardStatuses, restoreCardProgress, setCardStatus } = useCardLearningStatuses();
-  const [activeCardIndex, setActiveCardIndex] = useState(0);
-  const [isAnswerVisible, setIsAnswerVisible] = useState(false);
-  const [promotingCardId, setPromotingCardId] = useState<string | null>(null);
-  const [undoStack, setUndoStack] = useState<SwipeUndoEntry[]>([]);
   const translateX = useSharedValue(0);
   const internalFeedbackX = useSharedValue(0);
   const feedbackTranslateX = feedbackX ?? internalFeedbackX;
   const translateY = useSharedValue(0);
   const promotionProgress = useSharedValue(0);
+  const swipeOwnerCardId = useSharedValue<string | null>(null);
+  const promotionOwnerCardId = useSharedValue<string | null>(null);
   const cardWidth = Math.min(width - Spacing.four * 2, 560);
   const swipeThreshold = Math.max(92, cardWidth * 0.24);
   const swipeOutDistance = width + 160;
@@ -119,11 +123,38 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
         return firstCard.sortOrder - secondCard.sortOrder;
       });
   }, [cardStatuses, cards]);
-  const activeCardPosition =
-    flashcardQueue.length === 0 ? 0 : Math.min(activeCardIndex, flashcardQueue.length - 1);
-  const activeCard = flashcardQueue[activeCardPosition] ?? null;
+  const cardsById = useMemo(() => {
+    return new Map(cards.map((card) => [card.id, card]));
+  }, [cards]);
+  const [pendingDismissals, setPendingDismissals] = useState<PendingDismissals>({});
+  const [frontPinnedCard, setFrontPinnedCard] = useState<PracticeCard | null>(null);
+  const [isAnswerVisible, setIsAnswerVisible] = useState(false);
+  const [outgoingCardId, setOutgoingCardId] = useState<string | null>(null);
+  const [undoStack, setUndoStack] = useState<SwipeUndoEntry[]>([]);
+  const displayQueue = useMemo(() => {
+    const availableQueue = flashcardQueue.filter(
+      (card) => !isPendingDismissalActive(card.id, pendingDismissals, cardStatuses)
+    );
+
+    if (!frontPinnedCard) {
+      return availableQueue;
+    }
+
+    const pinnedCard =
+      availableQueue.find((card) => card.id === frontPinnedCard.id) ?? frontPinnedCard;
+
+    return [
+      pinnedCard,
+      ...availableQueue.filter((card) => card.id !== frontPinnedCard.id),
+    ];
+  }, [cardStatuses, flashcardQueue, frontPinnedCard, pendingDismissals]);
+  const activeCard = displayQueue[0] ?? null;
   const activeCardId = activeCard?.id ?? null;
-  const nextCard = flashcardQueue[getNextCardIndex(activeCardPosition, flashcardQueue.length)] ?? null;
+  const visibleCards = useMemo(
+    () => displayQueue.slice(0, VisibleCardCount),
+    [displayQueue]
+  );
+  const promotedCardId = visibleCards[1]?.id ?? null;
 
   const resetCardTranslation = useCallback(() => {
     translateX.set(0);
@@ -134,18 +165,28 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
     resetCardTranslation();
     feedbackTranslateX.set(0);
     promotionProgress.set(0);
-  }, [feedbackTranslateX, promotionProgress, resetCardTranslation]);
+    swipeOwnerCardId.set(null);
+    promotionOwnerCardId.set(null);
+  }, [
+    feedbackTranslateX,
+    promotionOwnerCardId,
+    promotionProgress,
+    resetCardTranslation,
+    swipeOwnerCardId,
+  ]);
 
   useEffect(() => {
-    promotionProgress.set(0);
-  }, [activeCardId, promotionProgress]);
+    if (swipeOwnerCardId.get() && swipeOwnerCardId.get() !== activeCardId) {
+      resetCardPosition();
+    }
+  }, [activeCardId, resetCardPosition, swipeOwnerCardId]);
 
   const handleToggleAnswerPress = useCallback(() => {
     setIsAnswerVisible((currentValue) => !currentValue);
   }, []);
 
-  const markCardAsPromoting = useCallback((cardId: string) => {
-    setPromotingCardId(cardId);
+  const markCardAsOutgoing = useCallback((cardId: string) => {
+    setOutgoingCardId(cardId);
   }, []);
 
   const completeSwipe = useCallback(
@@ -155,29 +196,31 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
         return;
       }
 
+      const dismissedAt = new Date().toISOString();
+
       unstable_batchedUpdates(() => {
-        resetCardTranslation();
         setUndoStack((currentStack) => [
           ...currentStack.slice(-4),
           {
             cardId: activeCard.id,
-            cardIndex: activeCardPosition,
+            card: activeCard,
             previousProgress: cardStatuses[activeCard.id],
           },
         ]);
-        setPromotingCardId(null);
+        setPendingDismissals((currentDismissals) => ({
+          ...currentDismissals,
+          [activeCard.id]: { dismissedAt },
+        }));
+        setFrontPinnedCard(null);
+        setOutgoingCardId(null);
         setIsAnswerVisible(false);
-        setActiveCardIndex(Math.min(activeCardPosition, Math.max(flashcardQueue.length - 2, 0)));
         setCardStatus(activeCard.id, status);
       });
     },
     [
       activeCard,
-      activeCardPosition,
       cardStatuses,
-      flashcardQueue.length,
       resetCardPosition,
-      resetCardTranslation,
       setCardStatus,
     ]
   );
@@ -189,20 +232,41 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
       return;
     }
 
+    const restoredCard = cardsById.get(undoEntry.cardId) ?? undoEntry.card;
+
     unstable_batchedUpdates(() => {
       resetCardPosition();
-      setPromotingCardId(null);
+      setOutgoingCardId(null);
+      setPendingDismissals((currentDismissals) => {
+        if (!(undoEntry.cardId in currentDismissals)) {
+          return currentDismissals;
+        }
+
+        const nextDismissals = { ...currentDismissals };
+        delete nextDismissals[undoEntry.cardId];
+        return nextDismissals;
+      });
+      setFrontPinnedCard(restoredCard);
       setUndoStack((currentStack) => currentStack.slice(0, -1));
       setIsAnswerVisible(false);
-      setActiveCardIndex(undoEntry.cardIndex);
       restoreCardProgress(undoEntry.cardId, undoEntry.previousProgress);
     });
-  }, [resetCardPosition, restoreCardProgress, undoStack]);
+  }, [cardsById, resetCardPosition, restoreCardProgress, undoStack]);
 
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
+        .onBegin(() => {
+          if (activeCardId) {
+            swipeOwnerCardId.set(activeCardId);
+            promotionOwnerCardId.set(null);
+            promotionProgress.set(0);
+          }
+        })
         .onUpdate((event) => {
+          if (activeCardId && swipeOwnerCardId.get() !== activeCardId) {
+            swipeOwnerCardId.set(activeCardId);
+          }
           translateX.set(event.translationX);
           feedbackTranslateX.set(event.translationX);
           translateY.set(event.translationY);
@@ -212,9 +276,16 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
             Math.abs(event.translationX) > swipeThreshold || Math.abs(event.velocityX) > 760;
 
           if (!shouldDecide) {
-            translateX.set(withSpring(0, SpringConfig));
+            translateX.set(
+              withSpring(0, SpringConfig, (finished) => {
+                if (finished) {
+                  swipeOwnerCardId.set(null);
+                }
+              })
+            );
             feedbackTranslateX.set(withTiming(0, { duration: FeedbackResetDuration }));
             translateY.set(withSpring(0, SpringConfig));
+            promotionOwnerCardId.set(null);
             promotionProgress.set(0);
             return;
           }
@@ -227,9 +298,11 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
             withTiming(direction * swipeOutDistance, { duration: 190 }, (finished) => {
               if (finished) {
                 if (activeCardId) {
-                  runOnJS(markCardAsPromoting)(activeCardId);
+                  runOnJS(markCardAsOutgoing)(activeCardId);
                 }
                 feedbackTranslateX.set(withTiming(0, { duration: FeedbackResetDuration }));
+                promotionOwnerCardId.set(promotedCardId);
+                promotionProgress.set(0);
                 promotionProgress.set(
                   withTiming(1, { duration: PromotionDuration }, (promoted) => {
                     if (promoted) {
@@ -246,70 +319,17 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
       activeCardId,
       completeSwipe,
       feedbackTranslateX,
-      markCardAsPromoting,
+      markCardAsOutgoing,
+      promotionOwnerCardId,
       promotionProgress,
+      promotedCardId,
       swipeOutDistance,
       swipeThreshold,
+      swipeOwnerCardId,
       translateX,
       translateY,
     ]
   );
-
-  const cardStyle = useAnimatedStyle(() => {
-    const x = translateX.get();
-    const y = translateY.get();
-    const absoluteX = Math.abs(x);
-
-    return {
-      opacity: interpolate(absoluteX, [0, swipeThreshold * 1.4], [1, 0.9], Extrapolation.CLAMP),
-      transform: [
-        { translateX: x },
-        { translateY: y },
-        {
-          rotate: `${interpolate(
-            x,
-            [-swipeThreshold * 1.4, 0, swipeThreshold * 1.4],
-            [-8, 0, 8],
-            Extrapolation.CLAMP
-          )}deg`,
-        },
-        {
-          scale: interpolate(absoluteX, [0, swipeThreshold * 1.6], [1, 0.97], Extrapolation.CLAMP),
-        },
-      ],
-    };
-  });
-
-  const nextCardStyle = useAnimatedStyle(() => {
-    const progress = interpolate(
-      Math.abs(translateX.get()),
-      [0, swipeThreshold],
-      [0, 1],
-      Extrapolation.CLAMP
-    );
-    const promotion = promotionProgress.get();
-    const previewOpacity = interpolate(progress, [0, 1], [0.34, 0.78], Extrapolation.CLAMP);
-    const previewTranslateY = interpolate(progress, [0, 1], [18, 8], Extrapolation.CLAMP);
-    const previewScale = interpolate(progress, [0, 1], [0.94, 0.98], Extrapolation.CLAMP);
-
-    return {
-      opacity: previewOpacity + (1 - previewOpacity) * promotion,
-      transform: [
-        { translateY: previewTranslateY * (1 - promotion) },
-        { scale: previewScale + (1 - previewScale) * promotion },
-      ],
-    };
-  });
-
-  const cardFeedbackStyle = useAnimatedStyle(() => {
-    return {
-      borderColor: interpolateColor(
-        translateX.get(),
-        [-swipeThreshold, 0, swipeThreshold],
-        [palette.amber, palette.border, palette.green]
-      ),
-    };
-  });
 
   const learningSignalStyle = useAnimatedStyle(() => {
     const signalFade = 1 - promotionProgress.get();
@@ -398,7 +418,7 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
       <View style={styles.header}>
         <View>
           <ThemedText type="code" themeColor="textSecondary" selectable>
-            {activeCardPosition + 1} / {flashcardQueue.length}
+            1 / {displayQueue.length}
           </ThemedText>
           <ThemedText style={styles.headerTitle} selectable>
             フラッシュカード
@@ -427,48 +447,26 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
           </ThemedText>
         </Animated.View>
 
-        {nextCard && nextCard.id !== activeCard.id && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.nextCard,
-              {
-                width: cardWidth,
-                backgroundColor: palette.card,
-                borderColor: palette.border,
-                boxShadow: palette.shadow,
-              },
-              nextCardStyle,
-            ]}>
-            <FlashcardFace
-              card={nextCard}
-              isAnswerVisible={false}
-              isPreview
-            />
-          </Animated.View>
-        )}
-
         <GestureDetector gesture={panGesture}>
-          <Animated.View
-            key={activeCard.id}
-            style={[
-              styles.card,
-              {
-                width: cardWidth,
-                backgroundColor: palette.card,
-                borderColor: palette.border,
-                boxShadow: palette.shadow,
-              },
-              cardFeedbackStyle,
-              cardStyle,
-              promotingCardId === activeCard.id && styles.promotingCard,
-            ]}>
-            <FlashcardFace
-              card={activeCard}
-              isAnswerVisible={isAnswerVisible}
-              onToggleAnswer={handleToggleAnswerPress}
-            />
-          </Animated.View>
+          <View collapsable={false} style={styles.cardStack}>
+            {visibleCards.map((card, position) => (
+              <FlashcardLayer
+                key={card.id}
+                card={card}
+                cardWidth={cardWidth}
+                isAnswerVisible={position === 0 && isAnswerVisible}
+                isOutgoing={card.id === outgoingCardId}
+                onToggleAnswer={position === 0 ? handleToggleAnswerPress : undefined}
+                position={position}
+                promotionOwnerCardId={promotionOwnerCardId}
+                promotionProgress={promotionProgress}
+                swipeOwnerCardId={swipeOwnerCardId}
+                swipeThreshold={swipeThreshold}
+                translateX={translateX}
+                translateY={translateY}
+              />
+            ))}
+          </View>
         </GestureDetector>
       </View>
 
@@ -477,6 +475,122 @@ export function SwipeFlashcardDeck({ groups, feedbackX }: SwipeFlashcardDeckProp
         onPress={handleUndoPress}
       />
     </View>
+  );
+}
+
+function FlashcardLayer({
+  card,
+  cardWidth,
+  isAnswerVisible,
+  isOutgoing,
+  onToggleAnswer,
+  position,
+  promotionOwnerCardId,
+  promotionProgress,
+  swipeOwnerCardId,
+  swipeThreshold,
+  translateX,
+  translateY,
+}: {
+  card: PracticeCard;
+  cardWidth: number;
+  isAnswerVisible: boolean;
+  isOutgoing: boolean;
+  onToggleAnswer?: () => void;
+  position: number;
+  promotionOwnerCardId: SharedValue<string | null>;
+  promotionProgress: SharedValue<number>;
+  swipeOwnerCardId: SharedValue<string | null>;
+  swipeThreshold: number;
+  translateX: SharedValue<number>;
+  translateY: SharedValue<number>;
+}) {
+  const palette = useDailyPalette();
+  const layerStyle = useAnimatedStyle(() => {
+    const x = translateX.get();
+    const y = translateY.get();
+    const absoluteX = Math.abs(x);
+    const isSwipeOwner = swipeOwnerCardId.get() === card.id;
+    const activeX = isSwipeOwner ? x : 0;
+    const activeY = isSwipeOwner ? y : 0;
+    const activeAbsoluteX = Math.abs(activeX);
+
+    if (position === 0) {
+      return {
+        borderColor: interpolateColor(
+          activeX,
+          [-swipeThreshold, 0, swipeThreshold],
+          [palette.amber, palette.border, palette.green]
+        ),
+        opacity: isOutgoing
+          ? 0
+          : interpolate(activeAbsoluteX, [0, swipeThreshold * 1.4], [1, 0.9], Extrapolation.CLAMP),
+        transform: [
+          { translateX: activeX },
+          { translateY: activeY },
+          {
+            rotate: `${interpolate(
+              activeX,
+              [-swipeThreshold * 1.4, 0, swipeThreshold * 1.4],
+              [-8, 0, 8],
+              Extrapolation.CLAMP
+            )}deg`,
+          },
+          {
+            scale: interpolate(
+              activeAbsoluteX,
+              [0, swipeThreshold * 1.6],
+              [1, 0.97],
+              Extrapolation.CLAMP
+            ),
+          },
+        ],
+      };
+    }
+
+    const isPromotionOwner = promotionOwnerCardId.get() === card.id;
+    const shouldPreviewSwipe = promotionOwnerCardId.get() === null && position === 1;
+    const swipeProgress = interpolate(
+      shouldPreviewSwipe || isPromotionOwner ? absoluteX : 0,
+      [0, swipeThreshold],
+      [0, 1],
+      Extrapolation.CLAMP
+    );
+    const promotion = isPromotionOwner ? promotionProgress.get() : 0;
+    const previewOpacity = interpolate(swipeProgress, [0, 1], [0.34, 0.78], Extrapolation.CLAMP);
+    const previewTranslateY = interpolate(swipeProgress, [0, 1], [18, 8], Extrapolation.CLAMP);
+    const previewScale = interpolate(swipeProgress, [0, 1], [0.94, 0.98], Extrapolation.CLAMP);
+
+    return {
+      opacity: previewOpacity + (1 - previewOpacity) * promotion,
+      transform: [
+        { translateY: previewTranslateY * (1 - promotion) },
+        { scale: previewScale + (1 - previewScale) * promotion },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View
+      pointerEvents={position === 0 && !isOutgoing ? 'auto' : 'none'}
+      style={[
+        styles.cardLayer,
+        {
+          width: cardWidth,
+          zIndex: getCardLayerZIndex(position),
+          backgroundColor: palette.card,
+          borderColor: palette.border,
+          boxShadow: palette.shadow,
+        },
+        layerStyle,
+      ]}>
+      <FlashcardFace
+        card={card}
+        isAnswerVisible={position === 0 && isAnswerVisible && !isOutgoing}
+        isPreview={position !== 0 || isOutgoing}
+        onToggleAnswer={position === 0 && !isOutgoing ? onToggleAnswer : undefined}
+      />
+    </Animated.View>
   );
 }
 
@@ -672,12 +786,35 @@ function CounterPill({
   );
 }
 
-function getNextCardIndex(currentIndex: number, length: number) {
-  if (length <= 1) {
-    return 0;
+function isPendingDismissalActive(
+  cardId: string,
+  pendingDismissals: PendingDismissals,
+  cardStatuses: Record<string, CardLearningProgress | undefined>
+) {
+  const pendingDismissal = pendingDismissals[cardId];
+
+  if (!pendingDismissal) {
+    return false;
   }
 
-  return currentIndex >= length - 1 ? 0 : currentIndex + 1;
+  const lastReviewedAt = cardStatuses[cardId]?.lastReviewedAt;
+
+  if (!lastReviewedAt) {
+    return true;
+  }
+
+  const lastReviewedTime = new Date(lastReviewedAt).getTime();
+  const dismissedTime = new Date(pendingDismissal.dismissedAt).getTime();
+
+  return (
+    Number.isNaN(lastReviewedTime) ||
+    Number.isNaN(dismissedTime) ||
+    lastReviewedTime < dismissedTime
+  );
+}
+
+function getCardLayerZIndex(position: number) {
+  return VisibleCardCount + 1 - position;
 }
 
 const styles = StyleSheet.create({
@@ -724,6 +861,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  cardStack: {
+    width: '100%',
+    height: '100%',
+    minHeight: 430,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   undoButton: {
     minHeight: 44,
     minWidth: 138,
@@ -752,31 +896,16 @@ const styles = StyleSheet.create({
     lineHeight: 52,
     fontWeight: 900,
   },
-  nextCard: {
+  cardLayer: {
     position: 'absolute',
     height: '100%',
     minHeight: 400,
     maxHeight: 520,
-    zIndex: 1,
     borderWidth: 1,
     borderRadius: 28,
     borderCurve: 'continuous',
     padding: Spacing.four,
     gap: Spacing.four,
-  },
-  card: {
-    minHeight: 400,
-    maxHeight: 520,
-    flex: 1,
-    zIndex: 3,
-    borderWidth: 1,
-    borderRadius: 28,
-    borderCurve: 'continuous',
-    padding: Spacing.four,
-    gap: Spacing.four,
-  },
-  promotingCard: {
-    opacity: 0,
   },
   cardHeader: {
     flexDirection: 'row',
