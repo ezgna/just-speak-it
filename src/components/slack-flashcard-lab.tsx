@@ -11,7 +11,6 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import type { EdgeInsets } from 'react-native-safe-area-context';
 import Animated, {
-  Easing,
   Extrapolation,
   interpolate,
   interpolateColor,
@@ -47,183 +46,52 @@ type SlackFlashcardLabProps = {
 };
 
 type UndoEntry = {
+  cardId: string;
   card: PracticeCard;
   previousProgress: CardLearningProgress | undefined;
 };
 
 type PendingDismissals = Record<string, { dismissedAt: string }>;
 
-const SpringConfig = {
-  damping: 18,
-  stiffness: 190,
+const CancelReturnSpringConfig = {
+  damping: 30,
+  mass: 0.9,
+  stiffness: 210,
 };
-const SwipeOutTiming = {
-  duration: 250,
-  easing: Easing.out(Easing.cubic),
-};
-const StackPromotionTiming = {
-  duration: 250,
-  easing: Easing.out(Easing.cubic),
-};
+const PromotionDuration = 170;
 const VisibleCardCount = 3;
-const TransitionReleaseDelayMs = 80;
-
-function SlackCardLayer({
-  card,
-  cardHeight,
-  cardWidth,
-  isAnswerVisible,
-  isOutgoing,
-  onToggleAnswer,
-  position,
-  swipeOwnerCardId,
-  swipeThreshold,
-  stackProgress,
-  translateX,
-  translateY,
-}: {
-  card: PracticeCard;
-  cardHeight: number;
-  cardWidth: number;
-  isAnswerVisible: boolean;
-  isOutgoing: boolean;
-  onToggleAnswer?: () => void;
-  position: number;
-  swipeOwnerCardId: SharedValue<string | null>;
-  swipeThreshold: number;
-  stackProgress: SharedValue<number>;
-  translateX: SharedValue<number>;
-  translateY: SharedValue<number>;
-}) {
-  const cardStyle = useAnimatedStyle(() => {
-    const x = translateX.get();
-    const y = translateY.get();
-    const isSwipeOwner = swipeOwnerCardId.get() === card.id;
-    const activeX = isSwipeOwner ? x : 0;
-    const activeY = isSwipeOwner ? y : 0;
-    const activeAbsoluteX = Math.abs(activeX);
-    const progress = stackProgress.get();
-
-    if (position === 0) {
-      return {
-        zIndex: 100,
-        borderColor: interpolateColor(
-          activeX,
-          [-swipeThreshold, 0, swipeThreshold],
-          [LabColors.keepBlue, 'rgba(255, 255, 255, 0.54)', LabColors.green]
-        ),
-        opacity: interpolate(
-          activeAbsoluteX,
-          [0, swipeThreshold * 1.6],
-          [1, 0.94],
-          Extrapolation.CLAMP
-        ),
-        transform: [
-          { translateX: activeX },
-          { translateY: activeY },
-          {
-            rotate: `${interpolate(
-              activeX,
-              [-swipeThreshold * 1.6, 0, swipeThreshold * 1.6],
-              [-9, 0, 9],
-              Extrapolation.CLAMP
-            )}deg`,
-          },
-          {
-            scale: interpolate(
-              activeAbsoluteX,
-              [0, swipeThreshold * 1.5],
-              [1, 0.975],
-              Extrapolation.CLAMP
-            ),
-          },
-        ],
-      };
-    }
-
-    const visualPosition = Math.min(Math.max(position - progress, 0), 2);
-
-    return {
-      zIndex: Math.round(90 - visualPosition * 10),
-      opacity: interpolate(
-        visualPosition,
-        [0, 1, 2],
-        [1, 0.44, 0.16],
-        Extrapolation.CLAMP
-      ),
-      transform: [
-        {
-          translateY: interpolate(
-            visualPosition,
-            [0, 1, 2],
-            [0, 34, 52],
-            Extrapolation.CLAMP
-          ),
-        },
-        {
-          scale: interpolate(
-            visualPosition,
-            [0, 1, 2],
-            [1, 0.94, 0.9],
-            Extrapolation.CLAMP
-          ),
-        },
-      ],
-    };
-  });
-
-  return (
-    <Animated.View
-      pointerEvents={position === 0 && !isOutgoing ? 'auto' : 'none'}
-      style={[
-        styles.cardLayer,
-        position === 0 ? styles.frontCardLayer : styles.nextCardLayer,
-        {
-          width: cardWidth,
-          height: cardHeight,
-        },
-        cardStyle,
-      ]}>
-      <SlackCardFace
-        card={card}
-        isAnswerVisible={position === 0 && isAnswerVisible && !isOutgoing}
-        isPreview={position !== 0 || isOutgoing}
-        onToggleAnswer={position === 0 && !isOutgoing ? onToggleAnswer : undefined}
-      />
-      {position === 0 && (
-        <DecisionOverlay
-          cardId={card.id}
-          swipeThreshold={swipeThreshold}
-          swipeOwnerCardId={swipeOwnerCardId}
-          translateX={translateX}
-        />
-      )}
-    </Animated.View>
-  );
-}
+const BackCardTranslateY = 38;
+const BackCardScale = 0.93;
+const DeepCardTranslateY = BackCardTranslateY;
+const DeepCardScale = 0.88;
+const ActiveBackCardTranslateY = 12;
+const ActiveBackCardScale = 0.985;
+const DeepCardDragLag = 0.78;
 
 export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabProps) {
   const { width, height } = useWindowDimensions();
   const { cardStatuses, restoreCardProgress, setCardStatus } = useCardLearningStatuses();
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
-  const stackProgress = useSharedValue(0);
+  const promotionProgress = useSharedValue(0);
   const swipeOwnerCardId = useSharedValue<string | null>(null);
-  const isDecisionAnimating = useSharedValue(false);
+  const promotionOwnerCardId = useSharedValue<string | null>(null);
+  const trailingPromotionOwnerCardId = useSharedValue<string | null>(null);
+  const decisionOwnerCardId = useSharedValue<string | null>(null);
   const [pendingDismissals, setPendingDismissals] = useState<PendingDismissals>({});
   const [frontPinnedCard, setFrontPinnedCard] = useState<PracticeCard | null>(null);
   const [isAnswerVisible, setIsAnswerVisible] = useState(false);
-  const [outgoingCardId, setOutgoingCardId] = useState<string | null>(null);
-  const [transitionQueue, setTransitionQueue] = useState<PracticeCard[] | null>(null);
+  const [visualQueue, setVisualQueue] = useState<PracticeCard[] | null>(null);
+  const [pendingVisualQueueRelease, setPendingVisualQueueRelease] = useState(0);
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
 
   const horizontalPadding =
     Math.max(safeAreaInsets.left, Spacing.three) +
     Math.max(safeAreaInsets.right, Spacing.three);
   const verticalReservedSpace =
-    safeAreaInsets.top + safeAreaInsets.bottom + BottomTabInset + 260;
+    safeAreaInsets.top + safeAreaInsets.bottom + BottomTabInset + 252;
   const cardWidth = Math.min(width - horizontalPadding, 560);
-  const cardHeight = Math.min(Math.max(height - verticalReservedSpace, 340), 520);
+  const cardHeight = Math.min(Math.max(height - verticalReservedSpace, 360), 540);
   const swipeThreshold = Math.max(88, cardWidth * 0.22);
   const swipeOutDistance = width + 180;
   const rootInsets = {
@@ -277,123 +145,112 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       ...availableQueue.filter((card) => card.id !== frontPinnedCard.id),
     ];
   }, [cardStatuses, frontPinnedCard, pendingDismissals, reviewQueue]);
-  const visualQueue = transitionQueue ?? displayQueue.slice(0, VisibleCardCount);
+  const renderQueue = visualQueue ?? displayQueue;
   const visibleCards = useMemo(
-    () => visualQueue.slice(0, VisibleCardCount),
-    [visualQueue]
+    () => renderQueue.slice(0, VisibleCardCount),
+    [renderQueue]
   );
-  const activeCard = visibleCards[0] ?? null;
+  const activeCard = renderQueue[0] ?? null;
   const activeCardId = activeCard?.id ?? null;
+  const promotedCardId = visibleCards[1]?.id ?? null;
+  const trailingPromotedCardId = visibleCards[2]?.id ?? null;
 
-  const resetPosition = useCallback(() => {
+  const resetCardTranslation = useCallback(() => {
     translateX.set(0);
     translateY.set(0);
-    stackProgress.set(0);
+  }, [translateX, translateY]);
+
+  const resetCardPosition = useCallback(() => {
+    resetCardTranslation();
+    promotionProgress.set(0);
     swipeOwnerCardId.set(null);
-  }, [stackProgress, swipeOwnerCardId, translateX, translateY]);
+    promotionOwnerCardId.set(null);
+    trailingPromotionOwnerCardId.set(null);
+    decisionOwnerCardId.set(null);
+  }, [
+    decisionOwnerCardId,
+    promotionOwnerCardId,
+    promotionProgress,
+    resetCardTranslation,
+    swipeOwnerCardId,
+    trailingPromotionOwnerCardId,
+  ]);
 
   useEffect(() => {
-    if (isDecisionAnimating.get()) {
+    if (pendingVisualQueueRelease !== 0) {
       return;
     }
 
     if (swipeOwnerCardId.get() && swipeOwnerCardId.get() !== activeCardId) {
-      resetPosition();
+      resetCardPosition();
     }
-  }, [activeCardId, isDecisionAnimating, resetPosition, swipeOwnerCardId]);
+  }, [activeCardId, pendingVisualQueueRelease, resetCardPosition, swipeOwnerCardId]);
+
+  useEffect(() => {
+    if (pendingVisualQueueRelease === 0) {
+      return;
+    }
+
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        resetCardPosition();
+        setVisualQueue(null);
+        setPendingVisualQueueRelease(0);
+      });
+    });
+
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [pendingVisualQueueRelease, resetCardPosition]);
 
   const handleToggleAnswerPress = useCallback(() => {
     setIsAnswerVisible((currentValue) => !currentValue);
   }, []);
 
-  const beginDecisionVisuals = useCallback(
-    () => {
-      setTransitionQueue(displayQueue.slice(0, VisibleCardCount));
-    },
-    [displayQueue]
-  );
+  const lockVisualQueue = useCallback(() => {
+    setVisualQueue(displayQueue.slice(0, VisibleCardCount));
+  }, [displayQueue]);
 
-  const completeDecision = useCallback(
+  const unlockVisualQueue = useCallback(() => {
+    setVisualQueue(null);
+  }, []);
+
+  const completeSwipe = useCallback(
     (status: CardLearningStatus) => {
       if (!activeCard) {
-        resetPosition();
-        isDecisionAnimating.set(false);
+        resetCardPosition();
         return;
       }
 
-      const decidedCard = activeCard;
       const dismissedAt = new Date().toISOString();
       const nextVisualQueue = displayQueue
-        .filter((card) => card.id !== decidedCard.id)
+        .filter((card) => card.id !== activeCard.id)
         .slice(0, VisibleCardCount);
 
       unstable_batchedUpdates(() => {
-        setTransitionQueue(nextVisualQueue);
-        setOutgoingCardId(null);
-        setIsAnswerVisible(false);
+        setVisualQueue(nextVisualQueue);
+        setPendingVisualQueueRelease((currentValue) => currentValue + 1);
         setUndoStack((currentStack) => [
           ...currentStack.slice(-4),
           {
-            card: decidedCard,
-            previousProgress: cardStatuses[decidedCard.id],
+            cardId: activeCard.id,
+            card: activeCard,
+            previousProgress: cardStatuses[activeCard.id],
           },
         ]);
         setPendingDismissals((currentDismissals) => ({
           ...currentDismissals,
-          [decidedCard.id]: { dismissedAt },
+          [activeCard.id]: { dismissedAt },
         }));
         setFrontPinnedCard(null);
-        setCardStatus(decidedCard.id, status);
-      });
-
-      requestAnimationFrame(() => {
-        resetPosition();
-
-        setTimeout(() => {
-          setTransitionQueue(null);
-          isDecisionAnimating.set(false);
-        }, TransitionReleaseDelayMs);
+        setIsAnswerVisible(false);
+        setCardStatus(activeCard.id, status);
       });
     },
-    [activeCard, cardStatuses, displayQueue, isDecisionAnimating, resetPosition, setCardStatus]
-  );
-
-  const animateDecision = useCallback(
-    (status: CardLearningStatus) => {
-      if (!activeCardId || isDecisionAnimating.get()) {
-        return;
-      }
-
-      beginDecisionVisuals();
-      isDecisionAnimating.set(true);
-
-      const direction = status === 'known' ? 1 : -1;
-
-      swipeOwnerCardId.set(activeCardId);
-      stackProgress.set(0);
-      translateX.set(
-        withTiming(direction * swipeOutDistance, SwipeOutTiming)
-      );
-      stackProgress.set(
-        withTiming(1, StackPromotionTiming, (finished) => {
-          if (finished) {
-            runOnJS(completeDecision)(status);
-          }
-        })
-      );
-      translateY.set(withTiming(status === 'known' ? -18 : 18, SwipeOutTiming));
-    },
-    [
-      activeCardId,
-      beginDecisionVisuals,
-      completeDecision,
-      isDecisionAnimating,
-      swipeOutDistance,
-      swipeOwnerCardId,
-      stackProgress,
-      translateX,
-      translateY,
-    ]
+    [activeCard, cardStatuses, displayQueue, resetCardPosition, setCardStatus]
   );
 
   const handleUndoPress = useCallback(() => {
@@ -403,96 +260,169 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       return;
     }
 
-    const restoredCard = cardsById.get(undoEntry.card.id) ?? undoEntry.card;
+    const restoredCard = cardsById.get(undoEntry.cardId) ?? undoEntry.card;
+
     unstable_batchedUpdates(() => {
-      isDecisionAnimating.set(false);
-      resetPosition();
-      setOutgoingCardId(null);
-      setTransitionQueue(null);
+      resetCardPosition();
+      setVisualQueue(null);
+      setPendingVisualQueueRelease(0);
       setPendingDismissals((currentDismissals) => {
-        if (!(undoEntry.card.id in currentDismissals)) {
+        if (!(undoEntry.cardId in currentDismissals)) {
           return currentDismissals;
         }
 
         const nextDismissals = { ...currentDismissals };
-        delete nextDismissals[undoEntry.card.id];
+        delete nextDismissals[undoEntry.cardId];
         return nextDismissals;
       });
       setFrontPinnedCard(restoredCard);
       setUndoStack((currentStack) => currentStack.slice(0, -1));
       setIsAnswerVisible(false);
-      restoreCardProgress(undoEntry.card.id, undoEntry.previousProgress);
+      restoreCardProgress(undoEntry.cardId, undoEntry.previousProgress);
     });
-  }, [cardsById, isDecisionAnimating, resetPosition, restoreCardProgress, undoStack]);
+  }, [cardsById, resetCardPosition, restoreCardProgress, undoStack]);
+
+  const animateCardDecision = useCallback(
+    (status: CardLearningStatus, releaseTranslateY = status === 'known' ? -18 : 18) => {
+      const decisionQueue = displayQueue.slice(0, VisibleCardCount);
+      const decisionActiveCardId = decisionQueue[0]?.id ?? null;
+      const decisionPromotedCardId = decisionQueue[1]?.id ?? null;
+      const decisionTrailingPromotedCardId = decisionQueue[2]?.id ?? null;
+
+      if (!decisionActiveCardId || decisionOwnerCardId.get()) {
+        return;
+      }
+
+      const direction = status === 'known' ? 1 : -1;
+
+      setVisualQueue(decisionQueue);
+      decisionOwnerCardId.set(decisionActiveCardId);
+      swipeOwnerCardId.set(decisionActiveCardId);
+      promotionOwnerCardId.set(null);
+      trailingPromotionOwnerCardId.set(null);
+      promotionProgress.set(0);
+      translateX.set(
+        withTiming(direction * swipeOutDistance, { duration: 190 }, (finished) => {
+          if (finished) {
+            promotionOwnerCardId.set(decisionPromotedCardId);
+            trailingPromotionOwnerCardId.set(decisionTrailingPromotedCardId);
+            promotionProgress.set(0);
+            promotionProgress.set(
+              withTiming(1, { duration: PromotionDuration }, (promoted) => {
+                if (promoted) {
+                  runOnJS(completeSwipe)(status);
+                }
+              })
+            );
+          }
+        })
+      );
+      translateY.set(withTiming(releaseTranslateY, { duration: 190 }));
+    },
+    [
+      completeSwipe,
+      decisionOwnerCardId,
+      displayQueue,
+      promotionOwnerCardId,
+      promotionProgress,
+      swipeOutDistance,
+      swipeOwnerCardId,
+      trailingPromotionOwnerCardId,
+      translateX,
+      translateY,
+    ]
+  );
 
   const panGesture = useMemo(
     () =>
       Gesture.Pan()
-        .activeOffsetX([-10, 10])
         .onBegin(() => {
-          if (activeCardId) {
+          if (activeCardId && !decisionOwnerCardId.get()) {
+            runOnJS(lockVisualQueue)();
             swipeOwnerCardId.set(activeCardId);
-            stackProgress.set(0);
+            promotionOwnerCardId.set(null);
+            trailingPromotionOwnerCardId.set(null);
+            promotionProgress.set(0);
           }
         })
         .onUpdate((event) => {
+          if (decisionOwnerCardId.get()) {
+            return;
+          }
+
+          if (activeCardId && swipeOwnerCardId.get() !== activeCardId) {
+            swipeOwnerCardId.set(activeCardId);
+          }
+
           translateX.set(event.translationX);
           translateY.set(event.translationY);
-          if (!isDecisionAnimating.get()) {
-            stackProgress.set(
-              Math.min((Math.abs(event.translationX) / swipeThreshold) * 0.65, 0.65)
-            );
-          }
         })
         .onEnd((event) => {
+          if (decisionOwnerCardId.get()) {
+            return;
+          }
+
           const shouldDecide =
             Math.abs(event.translationX) > swipeThreshold || Math.abs(event.velocityX) > 760;
 
           if (!shouldDecide) {
             translateX.set(
-              withSpring(0, SpringConfig, (finished) => {
+              withSpring(0, CancelReturnSpringConfig, (finished) => {
                 if (finished) {
                   swipeOwnerCardId.set(null);
+                  runOnJS(unlockVisualQueue)();
                 }
               })
             );
-            translateY.set(withSpring(0, SpringConfig));
-            stackProgress.set(withSpring(0, SpringConfig));
+            translateY.set(withSpring(0, CancelReturnSpringConfig));
+            promotionOwnerCardId.set(null);
+            trailingPromotionOwnerCardId.set(null);
+            promotionProgress.set(0);
             return;
           }
 
           const status = event.translationX > 0 ? 'known' : 'learning';
           const direction = status === 'known' ? 1 : -1;
 
-          if (!activeCardId || isDecisionAnimating.get()) {
+          if (!activeCardId) {
             return;
           }
 
-          runOnJS(beginDecisionVisuals)();
-          isDecisionAnimating.set(true);
+          decisionOwnerCardId.set(activeCardId);
           translateX.set(
-            withTiming(direction * swipeOutDistance, SwipeOutTiming)
-          );
-          stackProgress.set(
-            withTiming(1, StackPromotionTiming, (finished) => {
+            withTiming(direction * swipeOutDistance, { duration: 190 }, (finished) => {
               if (finished) {
-                runOnJS(completeDecision)(status);
+                promotionOwnerCardId.set(promotedCardId);
+                trailingPromotionOwnerCardId.set(trailingPromotedCardId);
+                promotionProgress.set(0);
+                promotionProgress.set(
+                  withTiming(1, { duration: PromotionDuration }, (promoted) => {
+                    if (promoted) {
+                      runOnJS(completeSwipe)(status);
+                    }
+                  })
+                );
               }
             })
           );
-          translateY.set(withTiming(event.translationY * 0.32, SwipeOutTiming));
+          translateY.set(withTiming(event.translationY * 0.35, { duration: 190 }));
         }),
     [
       activeCardId,
-      beginDecisionVisuals,
-      completeDecision,
-      isDecisionAnimating,
+      completeSwipe,
+      decisionOwnerCardId,
+      lockVisualQueue,
+      promotedCardId,
+      promotionOwnerCardId,
+      promotionProgress,
       swipeOutDistance,
-      swipeOwnerCardId,
       swipeThreshold,
-      stackProgress,
+      swipeOwnerCardId,
+      trailingPromotedCardId,
+      trailingPromotionOwnerCardId,
       translateX,
       translateY,
+      unlockVisualQueue,
     ]
   );
 
@@ -514,7 +444,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
                     android: 'check_circle',
                     web: 'check_circle',
                   }}
-                  size={44}
+                  size={42}
                   tintColor={LabColors.green}
                 />
               </View>
@@ -522,7 +452,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
                 今日の復習は完了です
               </ThemedText>
               <ThemedText style={styles.doneText} selectable>
-                次に復習日が来たカードから、このインボックスに戻ってきます。
+                次に復習日が来たカードから、この実験タブに戻ってきます。
               </ThemedText>
             </View>
           </View>
@@ -550,12 +480,13 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
                   cardHeight={cardHeight}
                   cardWidth={cardWidth}
                   isAnswerVisible={position === 0 && isAnswerVisible}
-                  isOutgoing={card.id === outgoingCardId}
                   onToggleAnswer={position === 0 ? handleToggleAnswerPress : undefined}
                   position={position}
+                  promotionOwnerCardId={promotionOwnerCardId}
+                  promotionProgress={promotionProgress}
                   swipeOwnerCardId={swipeOwnerCardId}
                   swipeThreshold={swipeThreshold}
-                  stackProgress={stackProgress}
+                  trailingPromotionOwnerCardId={trailingPromotionOwnerCardId}
                   translateX={translateX}
                   translateY={translateY}
                 />
@@ -568,14 +499,182 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
           <DecisionButton
             label="もう一回"
             tone="keep"
-            onPress={() => animateDecision('learning')}
+            onPress={() => animateCardDecision('learning')}
           />
           <DecisionButton
             label="言えた"
             tone="read"
-            onPress={() => animateDecision('known')}
+            onPress={() => animateCardDecision('known')}
           />
         </View>
+      </View>
+    </Animated.View>
+  );
+}
+
+function SlackCardLayer({
+  card,
+  cardHeight,
+  cardWidth,
+  isAnswerVisible,
+  onToggleAnswer,
+  position,
+  promotionOwnerCardId,
+  promotionProgress,
+  swipeOwnerCardId,
+  swipeThreshold,
+  trailingPromotionOwnerCardId,
+  translateX,
+  translateY,
+}: {
+  card: PracticeCard;
+  cardHeight: number;
+  cardWidth: number;
+  isAnswerVisible: boolean;
+  onToggleAnswer?: () => void;
+  position: number;
+  promotionOwnerCardId: SharedValue<string | null>;
+  promotionProgress: SharedValue<number>;
+  swipeOwnerCardId: SharedValue<string | null>;
+  swipeThreshold: number;
+  trailingPromotionOwnerCardId: SharedValue<string | null>;
+  translateX: SharedValue<number>;
+  translateY: SharedValue<number>;
+}) {
+  const layerStyle = useAnimatedStyle(() => {
+    const x = translateX.get();
+    const y = translateY.get();
+    const absoluteX = Math.abs(x);
+    const isSwipeOwner = swipeOwnerCardId.get() === card.id;
+    const activeX = isSwipeOwner ? x : 0;
+    const activeY = isSwipeOwner ? y : 0;
+    const activeAbsoluteX = Math.abs(activeX);
+
+    if (position === 0) {
+      return {
+        backgroundColor: interpolateColor(
+          activeX,
+          [-swipeThreshold, 0, swipeThreshold],
+          [LabColors.keepOverlayRim, LabColors.white, LabColors.readOverlayRim]
+        ),
+        borderColor: interpolateColor(
+          activeX,
+          [-swipeThreshold, 0, swipeThreshold],
+          [LabColors.keepOverlayRim, LabColors.white, LabColors.readOverlayRim]
+        ),
+        transform: [
+          { translateX: activeX },
+          { translateY: activeY },
+          {
+            rotate: `${interpolate(
+              activeX,
+              [-swipeThreshold * 1.4, 0, swipeThreshold * 1.4],
+              [-8, 0, 8],
+              Extrapolation.CLAMP
+            )}deg`,
+          },
+          {
+            scale: interpolate(
+              activeAbsoluteX,
+              [0, swipeThreshold * 1.6],
+              [1, 0.97],
+              Extrapolation.CLAMP
+            ),
+          },
+        ],
+      };
+    }
+
+    const swipeProgress = interpolate(
+      absoluteX,
+      [0, swipeThreshold],
+      [0, 1],
+      Extrapolation.CLAMP
+    );
+    const promotionOwner = promotionOwnerCardId.get();
+    const isPromotionOwner = promotionOwner === card.id;
+    const isPromotingStack = promotionOwner !== null;
+
+    if (position === 1) {
+      const dragProgress = isPromotionOwner ? 1 : isPromotingStack ? 0 : swipeProgress;
+      const promotion = isPromotionOwner ? promotionProgress.get() : 0;
+      const previewTranslateY = interpolate(
+        dragProgress,
+        [0, 1],
+        [BackCardTranslateY, ActiveBackCardTranslateY],
+        Extrapolation.CLAMP
+      );
+      const previewScale = interpolate(
+        dragProgress,
+        [0, 1],
+        [BackCardScale, ActiveBackCardScale],
+        Extrapolation.CLAMP
+      );
+
+      return {
+        transform: [
+          { translateY: previewTranslateY * (1 - promotion) },
+          { scale: previewScale + (1 - previewScale) * promotion },
+        ],
+      };
+    }
+
+    const isTrailingPromotionOwner = trailingPromotionOwnerCardId.get() === card.id;
+    const trailingBaseProgress = swipeProgress * DeepCardDragLag;
+    const trailingProgress = isTrailingPromotionOwner
+      ? DeepCardDragLag + (1 - DeepCardDragLag) * promotionProgress.get()
+      : isPromotingStack
+        ? 0
+        : trailingBaseProgress;
+    const previewTranslateY = interpolate(
+      trailingProgress,
+      [0, 1],
+      [DeepCardTranslateY, BackCardTranslateY],
+      Extrapolation.CLAMP
+    );
+    const previewScale = interpolate(
+      trailingProgress,
+      [0, 1],
+      [DeepCardScale, BackCardScale],
+      Extrapolation.CLAMP
+    );
+
+    return {
+      transform: [
+        { translateY: previewTranslateY },
+        { scale: previewScale },
+      ],
+    };
+  });
+
+  return (
+    <Animated.View
+      pointerEvents={position === 0 ? 'auto' : 'none'}
+      style={[
+        styles.cardLayer,
+        {
+          width: cardWidth,
+          height: cardHeight,
+          zIndex: getCardLayerZIndex(position),
+        },
+        position === 0 ? styles.frontCardLayer : styles.previewCardLayer,
+        layerStyle,
+      ]}>
+      <View style={styles.cardClip}>
+        <SlackCardFace
+          card={card}
+          isAnswerVisible={position === 0 && isAnswerVisible}
+          isPreview={position !== 0}
+          onToggleAnswer={position === 0 ? onToggleAnswer : undefined}
+        />
+        {position === 0 && (
+          <DecisionOverlay
+            cardId={card.id}
+            swipeThreshold={swipeThreshold}
+            swipeOwnerCardId={swipeOwnerCardId}
+            translateX={translateX}
+          />
+        )}
       </View>
     </Animated.View>
   );
@@ -640,6 +739,8 @@ function SlackCardFace({
   onToggleAnswer?: () => void;
 }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const sideLabel = isAnswerVisible ? 'English' : '日本語';
+  const flipAccessibilityLabel = isAnswerVisible ? '日本語を表示する' : '英語を表示する';
 
   useEffect(() => {
     if (isPreview) {
@@ -683,105 +784,113 @@ function SlackCardFace({
   return (
     <View style={styles.cardFace}>
       <View style={styles.cardContent}>
-        <View style={styles.messageMetaRow}>
-          <View style={styles.avatar}>
-            <ThemedText style={styles.avatarText}>
-              英
+        <View style={styles.cardHeader}>
+          <View style={styles.cardTitleBlock}>
+            <ThemedText style={styles.cardEyebrow} selectable>
+              フラッシュカード
+            </ThemedText>
+            <ThemedText style={styles.cardTitle} numberOfLines={2} selectable>
+              {card.diaryTitle}
             </ThemedText>
           </View>
-          <View style={styles.messageMetaText}>
-            <View style={styles.authorLine}>
-              <ThemedText style={styles.authorName} numberOfLines={1} selectable>
-                Daily to English
-              </ThemedText>
-              <ThemedText style={styles.messageTime} selectable>
-                {formatShortTime(card.diaryCreatedAt)}
-              </ThemedText>
-            </View>
-            <ThemedText style={styles.diaryTitle} numberOfLines={1} selectable>
-              {formatPracticeDate(card.diaryCreatedAt)} ・ {formatPracticeSource(card.source)}
-            </ThemedText>
-          </View>
-          {!isPreview && isAnswerVisible && (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="英語を読み上げる"
-              onPress={handleSpeakPress}
-              style={({ pressed }) => [
-                styles.headerSoundButton,
-                {
-                  backgroundColor: isSpeaking ? LabColors.green : LabColors.cardTint,
-                  opacity: pressed ? 0.72 : 1,
-                },
+          <View style={[styles.sideBadge, isAnswerVisible ? styles.answerBadge : styles.promptBadge]}>
+            <ThemedText
+              style={[
+                styles.sideBadgeText,
+                { color: isAnswerVisible ? LabColors.green : LabColors.keepBlue },
               ]}>
-              <SymbolView
-                name={{
-                  ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
-                  android: 'volume_up',
-                  web: 'volume_up',
-                }}
-                size={18}
-                tintColor={isSpeaking ? LabColors.white : LabColors.text}
-              />
-            </Pressable>
-          )}
+              {sideLabel}
+            </ThemedText>
+          </View>
         </View>
 
-        <TapToFlipArea
-          accessibilityLabel={isAnswerVisible ? '日本語カード' : '英語カード'}
-          disabled={isPreview || !onToggleAnswer}
-          onPress={onToggleAnswer}>
+        <View style={styles.metaRow}>
+          <View style={styles.metaPill}>
+            <SymbolView
+              name={{
+                ios: 'calendar',
+                android: 'calendar_today',
+                web: 'calendar_today',
+              }}
+              size={13}
+              tintColor={LabColors.subtleText}
+            />
+            <ThemedText style={styles.metaText} numberOfLines={1} selectable>
+              {formatPracticeDate(card.diaryCreatedAt)}
+            </ThemedText>
+          </View>
+          <View style={styles.metaPill}>
+            <SymbolView
+              name={{
+                ios: card.source === 'voice' ? 'waveform' : 'text.alignleft',
+                android: card.source === 'voice' ? 'graphic_eq' : 'notes',
+                web: card.source === 'voice' ? 'graphic_eq' : 'notes',
+              }}
+              size={13}
+              tintColor={LabColors.subtleText}
+            />
+            <ThemedText style={styles.metaText} numberOfLines={1} selectable>
+              {formatPracticeSource(card.source)}
+            </ThemedText>
+          </View>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={flipAccessibilityLabel}
+          disabled={isPreview}
+          onPress={onToggleAnswer}
+          style={({ pressed }) => [
+            styles.promptPanel,
+            {
+              borderColor: isAnswerVisible ? LabColors.answerBorder : LabColors.promptBorder,
+              backgroundColor: pressed ? LabColors.cardPressed : LabColors.cardSoft,
+            },
+          ]}>
           <ThemedText
             style={isAnswerVisible ? styles.answerText : styles.promptText}
-            numberOfLines={isAnswerVisible ? 6 : 8}
+            numberOfLines={isAnswerVisible ? 7 : 8}
             adjustsFontSizeToFit
-            minimumFontScale={0.72}
+            minimumFontScale={0.7}
             selectable>
             {isAnswerVisible ? card.english : card.japanese}
           </ThemedText>
-        </TapToFlipArea>
+        </Pressable>
+
+        <View style={styles.cardFooter}>
+          <View style={styles.footerDivider} />
+          <View style={styles.footerContent}>
+            <ThemedText style={styles.footerLabel} selectable>
+              {isAnswerVisible ? '裏面' : '表面'}
+            </ThemedText>
+            {!isPreview && isAnswerVisible && (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="英語を読み上げる"
+                hitSlop={8}
+                onPress={handleSpeakPress}
+                style={({ pressed }) => [
+                  styles.soundButton,
+                  {
+                    backgroundColor: isSpeaking ? LabColors.green : LabColors.cardTint,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}>
+                <SymbolView
+                  name={{
+                    ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
+                    android: 'volume_up',
+                    web: 'volume_up',
+                  }}
+                  size={18}
+                  tintColor={isSpeaking ? LabColors.white : LabColors.text}
+                />
+              </Pressable>
+            )}
+          </View>
+        </View>
       </View>
     </View>
-  );
-}
-
-function TapToFlipArea({
-  accessibilityLabel,
-  children,
-  disabled,
-  onPress,
-}: {
-  accessibilityLabel: string;
-  children: React.ReactNode;
-  disabled: boolean;
-  onPress?: () => void;
-}) {
-  const tapGesture = useMemo(
-    () =>
-      Gesture.Tap()
-        .enabled(!disabled)
-        .maxDistance(8)
-        .maxDuration(220)
-        .onEnd((_event, success) => {
-          if (success && onPress) {
-            runOnJS(onPress)();
-          }
-        }),
-    [disabled, onPress]
-  );
-
-  return (
-    <GestureDetector gesture={tapGesture}>
-      <View
-        accessible={!disabled}
-        accessibilityLabel={accessibilityLabel}
-        accessibilityRole="button"
-        collapsable={false}
-        onAccessibilityTap={disabled ? undefined : onPress}
-        style={styles.messageBody}>
-        {children}
-      </View>
-    </GestureDetector>
   );
 }
 
@@ -832,12 +941,12 @@ function DecisionOverlay({
   swipeOwnerCardId: SharedValue<string | null>;
   translateX: SharedValue<number>;
 }) {
-  const overlayStyle = useAnimatedStyle(() => {
+  const overlaySurfaceStyle = useAnimatedStyle(() => {
     const x = swipeOwnerCardId.get() === cardId ? translateX.get() : 0;
     const absoluteX = Math.abs(x);
 
     return {
-      opacity: interpolate(absoluteX, [16, swipeThreshold], [0, 0.9], Extrapolation.CLAMP),
+      opacity: interpolate(absoluteX, [16, swipeThreshold], [0, 0.92], Extrapolation.CLAMP),
       backgroundColor: interpolateColor(
         x,
         [-swipeThreshold, 0, swipeThreshold],
@@ -881,7 +990,8 @@ function DecisionOverlay({
   });
 
   return (
-    <Animated.View pointerEvents="none" style={[styles.decisionOverlay, overlayStyle]}>
+    <View pointerEvents="none" style={styles.decisionOverlay}>
+      <Animated.View style={[styles.decisionOverlaySurface, overlaySurfaceStyle]} />
       <Animated.View style={[styles.overlayLabel, styles.keepOverlayLabel, keepLabelStyle]}>
         <View style={styles.overlayIcon}>
           <SymbolView
@@ -890,7 +1000,7 @@ function DecisionOverlay({
               android: 'replay',
               web: 'replay',
             }}
-            size={33}
+            size={32}
             tintColor={LabColors.keepOverlay}
           />
         </View>
@@ -915,7 +1025,7 @@ function DecisionOverlay({
           言えた
         </ThemedText>
       </Animated.View>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -946,11 +1056,8 @@ function isPendingDismissalActive(
   );
 }
 
-function formatShortTime(value: string) {
-  return new Intl.DateTimeFormat('ja-JP', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value));
+function getCardLayerZIndex(position: number) {
+  return VisibleCardCount + 1 - position;
 }
 
 const LabColors = {
@@ -959,13 +1066,18 @@ const LabColors = {
   text: '#1D1C1D',
   mutedText: '#616061',
   subtleText: '#717274',
-  line: '#E6E2E8',
-  cardTint: '#F3F4F6',
+  line: '#E8E2EA',
+  cardTint: '#F4F4F4',
+  cardSoft: '#FAFAFA',
+  cardPressed: '#F2F2F2',
+  promptBorder: '#DFD9E3',
+  answerBorder: '#D4E8DD',
   keepBlue: '#2D6FB5',
   keepOverlay: '#3678BD',
+  keepOverlayRim: '#4683C2',
   green: '#2E8B62',
   readOverlay: '#2F8B61',
-  avatar: '#F4B251',
+  readOverlayRim: '#40946E',
 };
 
 const styles = StyleSheet.create({
@@ -973,6 +1085,7 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     alignItems: 'center',
+    backgroundColor: LabColors.plum,
   },
   content: {
     flex: 1,
@@ -1038,16 +1151,21 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: 34,
     borderCurve: 'continuous',
-    overflow: 'hidden',
     backgroundColor: LabColors.white,
-    boxShadow: '0 22px 46px rgba(18, 8, 22, 0.28)',
-  },
-  nextCardLayer: {
-    zIndex: 1,
-    boxShadow: '0 18px 38px rgba(18, 8, 22, 0.18)',
   },
   frontCardLayer: {
-    zIndex: 2,
+    boxShadow: '0 22px 46px rgba(18, 8, 22, 0.28)',
+  },
+  previewCardLayer: {
+    borderColor: LabColors.white,
+    boxShadow: '0 22px 46px rgba(18, 8, 22, 0.28)',
+  },
+  cardClip: {
+    flex: 1,
+    borderRadius: 32.5,
+    borderCurve: 'continuous',
+    overflow: 'hidden',
+    backgroundColor: LabColors.white,
   },
   cardFace: {
     flex: 1,
@@ -1057,74 +1175,86 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
-  messageMetaRow: {
+  cardHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: Spacing.three,
+  },
+  cardTitleBlock: {
+    flex: 1,
+    gap: Spacing.one,
+  },
+  cardEyebrow: {
+    color: LabColors.subtleText,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: 800,
+  },
+  cardTitle: {
+    color: LabColors.text,
+    fontSize: 20,
+    lineHeight: 27,
+    fontWeight: 900,
+  },
+  sideBadge: {
+    minWidth: 76,
+    minHeight: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 17,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: Spacing.two,
+  },
+  promptBadge: {
+    backgroundColor: 'rgba(45, 111, 181, 0.1)',
+    borderColor: 'rgba(45, 111, 181, 0.22)',
+  },
+  answerBadge: {
+    backgroundColor: 'rgba(46, 139, 98, 0.12)',
+    borderColor: 'rgba(46, 139, 98, 0.24)',
+  },
+  sideBadgeText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: 900,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.two,
   },
-  avatar: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    backgroundColor: LabColors.avatar,
-  },
-  avatarText: {
-    color: LabColors.text,
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: 900,
-  },
-  messageMetaText: {
-    flex: 1,
-    gap: Spacing.one,
-  },
-  headerSoundButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 12,
-    borderCurve: 'continuous',
-  },
-  authorLine: {
-    minHeight: 24,
+  metaPill: {
+    maxWidth: '100%',
+    minHeight: 32,
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'center',
+    borderRadius: 16,
+    backgroundColor: LabColors.cardTint,
     gap: Spacing.one,
+    paddingHorizontal: Spacing.two,
   },
-  authorName: {
+  metaText: {
     flexShrink: 1,
-    color: LabColors.text,
-    fontSize: 19,
-    lineHeight: 25,
-    fontWeight: 900,
-  },
-  messageTime: {
-    color: LabColors.subtleText,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: 600,
-  },
-  diaryTitle: {
     color: LabColors.mutedText,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: 700,
   },
-  messageBody: {
+  promptPanel: {
     flex: 1,
     justifyContent: 'center',
-    paddingHorizontal: Spacing.one,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 24,
+    borderCurve: 'continuous',
+    padding: Spacing.three,
   },
   promptText: {
     color: LabColors.text,
-    fontSize: 28,
-    lineHeight: 38,
+    fontSize: 29,
+    lineHeight: 39,
     fontWeight: 900,
   },
   answerText: {
@@ -1133,6 +1263,34 @@ const styles = StyleSheet.create({
     lineHeight: 40,
     fontWeight: 900,
   },
+  cardFooter: {
+    gap: Spacing.two,
+  },
+  footerDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: LabColors.line,
+  },
+  footerContent: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  footerLabel: {
+    color: LabColors.subtleText,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: 800,
+  },
+  soundButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    borderCurve: 'continuous',
+  },
   decisionOverlay: {
     position: 'absolute',
     top: 0,
@@ -1140,6 +1298,13 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     justifyContent: 'center',
+  },
+  decisionOverlaySurface: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    bottom: -4,
+    left: -4,
   },
   overlayLabel: {
     position: 'absolute',
