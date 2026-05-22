@@ -1,3 +1,4 @@
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -18,6 +19,7 @@ import {
   flattenTranslationCardGroups,
   formatPracticeDate,
   StatusPriority,
+  type PracticeCard,
 } from '@/lib/practice-cards';
 
 type CardFilter = 'review' | 'all' | 'known';
@@ -99,47 +101,114 @@ export function EnglishPracticeDeck({ groups }: EnglishPracticeDeckProps) {
       return firstCard.sortOrder - secondCard.sortOrder;
     });
   }, [cardFilter, cardStatuses, cards, sortMode]);
+  const masteredPercent = cards.length === 0 ? 0 : Math.round((cardCounts.known / cards.length) * 100);
+  const masteryProgressWidth = `${masteredPercent}%` as `${number}%`;
 
   return (
     <>
-      <View style={styles.topPanel}>
+      <View
+        style={[
+          styles.overviewPanel,
+          {
+            backgroundColor: palette.card,
+            borderColor: palette.border,
+            boxShadow: palette.shadow,
+          },
+        ]}>
+        <View style={styles.masteryHeader}>
+          <ThemedText type="code" style={{ color: palette.textSecondary }}>
+            習得 {masteredPercent}%
+          </ThemedText>
+          <ThemedText type="code" style={{ color: palette.textSecondary }}>
+            {cardCounts.known} / {cards.length}
+          </ThemedText>
+        </View>
+        <View style={[styles.masteryTrack, { backgroundColor: palette.backgroundElement }]}>
+          <View
+            style={[
+              styles.masteryFill,
+              {
+                width: masteryProgressWidth,
+                backgroundColor: palette.green,
+              },
+            ]}
+          />
+        </View>
+
         <View style={styles.statsRow}>
-          <StatTile label="復習" value={cardCounts.due} tone="amber" />
-          <StatTile label="OK" value={cardCounts.known} tone="green" />
-          <StatTile label="合計" value={cards.length} tone="blue" />
+          <StatTile
+            icon={{ ios: 'clock.arrow.circlepath', android: 'schedule', web: 'schedule' }}
+            label="復習"
+            value={cardCounts.due}
+            detail={`${cardCounts.learning} 学習中`}
+            tone="amber"
+          />
+          <StatTile
+            icon={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }}
+            label="言えた"
+            value={cardCounts.known}
+            detail={`${cardCounts.new} 未判定`}
+            tone="green"
+          />
+          <StatTile
+            icon={{ ios: 'rectangle.stack.fill', android: 'layers', web: 'layers' }}
+            label="合計"
+            value={cards.length}
+            detail={`表示 ${visibleCards.length}`}
+            tone="blue"
+          />
         </View>
       </View>
 
       <View style={styles.deckSection}>
-        <View style={styles.optionRow}>
-          <FilterButton
-            label="復習"
-            active={cardFilter === 'review'}
-            onPress={() => setCardFilter('review')}
-          />
-          <FilterButton
-            label="すべて"
-            active={cardFilter === 'all'}
-            onPress={() => setCardFilter('all')}
-          />
-          <FilterButton
-            label="OK"
-            active={cardFilter === 'known'}
-            onPress={() => setCardFilter('known')}
-          />
-        </View>
+        <View
+          style={[
+            styles.controlPanel,
+            {
+              backgroundColor: palette.card,
+              borderColor: palette.border,
+            },
+          ]}>
+          <View style={styles.controlBlock}>
+            <ThemedText type="code" style={{ color: palette.textSecondary }}>
+              表示
+            </ThemedText>
+            <View style={[styles.segmentedRow, { backgroundColor: palette.backgroundElement }]}>
+              <FilterButton
+                label="復習"
+                active={cardFilter === 'review'}
+                onPress={() => setCardFilter('review')}
+              />
+              <FilterButton
+                label="すべて"
+                active={cardFilter === 'all'}
+                onPress={() => setCardFilter('all')}
+              />
+              <FilterButton
+                label="言えた"
+                active={cardFilter === 'known'}
+                onPress={() => setCardFilter('known')}
+              />
+            </View>
+          </View>
 
-        <View style={styles.optionRow}>
-          <FilterButton
-            label="復習順"
-            active={sortMode === 'review'}
-            onPress={() => setSortMode('review')}
-          />
-          <FilterButton
-            label="時系列"
-            active={sortMode === 'timeline'}
-            onPress={() => setSortMode('timeline')}
-          />
+          <View style={styles.controlBlock}>
+            <ThemedText type="code" style={{ color: palette.textSecondary }}>
+              並び順
+            </ThemedText>
+            <View style={[styles.segmentedRow, { backgroundColor: palette.backgroundElement }]}>
+              <FilterButton
+                label="復習順"
+                active={sortMode === 'review'}
+                onPress={() => setSortMode('review')}
+              />
+              <FilterButton
+                label="時系列"
+                active={sortMode === 'timeline'}
+                onPress={() => setSortMode('timeline')}
+              />
+            </View>
+          </View>
         </View>
 
         {visibleCards.length === 0 ? (
@@ -152,7 +221,7 @@ export function EnglishPracticeDeck({ groups }: EnglishPracticeDeckProps) {
               },
             ]}>
             <ThemedText type="smallBold" themeColor="textSecondary" selectable>
-              表示できるカードはありません。
+              {getEmptyMessage(cardFilter)}
             </ThemedText>
           </View>
         ) : (
@@ -162,59 +231,111 @@ export function EnglishPracticeDeck({ groups }: EnglishPracticeDeckProps) {
               const status = getCardStatus(cardStatuses, card.id);
 
               return (
-                <View
+                <PracticeCardItem
                   key={card.id}
-                  style={[
-                    styles.practiceCard,
-                    {
-                      width: isWideLayout ? '48.5%' : '100%',
-                      backgroundColor: palette.card,
-                      borderColor: getStatusBorderColor(status, palette),
-                      boxShadow: palette.shadow,
-                    },
-                  ]}>
-                  <View style={styles.cardMetaRow}>
-                    <ThemedText type="code" themeColor="textSecondary" selectable>
-                      {formatPracticeDate(card.diaryCreatedAt)}
-                    </ThemedText>
-                    <StatusPill progress={progress} />
-                  </View>
-
-                  <ThemedText style={styles.diaryTitle} numberOfLines={2} selectable>
-                    {card.diaryTitle}
-                  </ThemedText>
-
-                  <View style={styles.cardBody}>
-                    <ThemedText style={styles.japaneseText} selectable>
-                      {card.japanese}
-                    </ThemedText>
-                    <View style={[styles.divider, { backgroundColor: palette.border }]} />
-                    <ThemedText style={styles.englishText} selectable>
-                      {card.english}
-                    </ThemedText>
-                  </View>
-
-                  <View style={styles.cardActionRow}>
-                    <StatusActionButton
-                      label="まだ"
-                      active={status === 'learning'}
-                      tone="amber"
-                      onPress={() => setCardStatus(card.id, 'learning')}
-                    />
-                    <StatusActionButton
-                      label="OK"
-                      active={status === 'known'}
-                      tone="green"
-                      onPress={() => setCardStatus(card.id, 'known')}
-                    />
-                  </View>
-                </View>
+                  card={card}
+                  isWideLayout={isWideLayout}
+                  palette={palette}
+                  progress={progress}
+                  status={status}
+                  onSetStatus={setCardStatus}
+                />
               );
             })}
           </View>
         )}
       </View>
     </>
+  );
+}
+
+function PracticeCardItem({
+  card,
+  isWideLayout,
+  palette,
+  progress,
+  status,
+  onSetStatus,
+}: {
+  card: PracticeCard;
+  isWideLayout: boolean;
+  palette: Palette;
+  progress: CardLearningProgress;
+  status: CardLearningStatus;
+  onSetStatus: (cardId: string, status: CardLearningStatus) => void;
+}) {
+  const statusColor = getStatusBorderColor(status, palette);
+
+  return (
+    <View
+      style={[
+        styles.practiceCard,
+        {
+          width: isWideLayout ? '48.5%' : '100%',
+          backgroundColor: palette.card,
+          borderColor: palette.border,
+          boxShadow: palette.shadow,
+        },
+      ]}>
+      <View style={[styles.statusStripe, { backgroundColor: statusColor }]} />
+
+      <View style={styles.cardMetaRow}>
+        <View style={styles.dateRow}>
+          <SymbolView
+            name={{ ios: 'calendar', android: 'calendar_today', web: 'calendar_today' }}
+            size={13}
+            tintColor={palette.textSecondary}
+          />
+          <ThemedText type="code" themeColor="textSecondary" selectable>
+            {formatPracticeDate(card.diaryCreatedAt)}
+          </ThemedText>
+        </View>
+        <StatusPill progress={progress} />
+      </View>
+
+      <ThemedText style={styles.diaryTitle} numberOfLines={2} selectable>
+        {card.diaryTitle}
+      </ThemedText>
+
+      <View style={styles.cardBody}>
+        <View style={styles.languageBlock}>
+          <ThemedText type="code" style={{ color: palette.textSecondary }}>
+            日本語
+          </ThemedText>
+          <ThemedText style={styles.japaneseText} selectable>
+            {card.japanese}
+          </ThemedText>
+        </View>
+
+        <View style={[styles.divider, { backgroundColor: palette.border }]} />
+
+        <View style={styles.languageBlock}>
+          <ThemedText type="code" style={{ color: palette.primary }}>
+            ENGLISH
+          </ThemedText>
+          <ThemedText style={styles.englishText} selectable>
+            {card.english}
+          </ThemedText>
+        </View>
+      </View>
+
+      <View style={styles.cardActionRow}>
+        <StatusActionButton
+          icon={{ ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' }}
+          label="もう一回"
+          active={status === 'learning'}
+          tone="amber"
+          onPress={() => onSetStatus(card.id, 'learning')}
+        />
+        <StatusActionButton
+          icon={{ ios: 'checkmark', android: 'check', web: 'check' }}
+          label="言えた"
+          active={status === 'known'}
+          tone="green"
+          onPress={() => onSetStatus(card.id, 'known')}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -237,8 +358,9 @@ function FilterButton({
       style={({ pressed }) => [
         styles.filterButton,
         {
-          backgroundColor: active ? palette.cardAlt : palette.backgroundElement,
-          borderColor: active ? palette.primary : palette.border,
+          backgroundColor: active ? palette.card : 'transparent',
+          borderColor: active ? palette.border : 'transparent',
+          boxShadow: active ? '0 2px 8px rgba(31, 28, 20, 0.08)' : 'none',
           opacity: pressed ? 0.72 : 1,
         },
       ]}>
@@ -249,7 +371,19 @@ function FilterButton({
   );
 }
 
-function StatTile({ label, value, tone }: { label: string; value: number; tone: Tone }) {
+function StatTile({
+  detail,
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  detail: string;
+  icon: SymbolViewProps['name'];
+  label: string;
+  value: number;
+  tone: Tone;
+}) {
   const palette = useDailyPalette();
   const colors = getToneColors(tone, palette);
 
@@ -262,11 +396,17 @@ function StatTile({ label, value, tone }: { label: string; value: number; tone: 
           borderColor: colors.borderColor,
         },
       ]}>
-      <ThemedText type="code" style={{ color: colors.color }}>
-        {label}
-      </ThemedText>
+      <View style={styles.statHeader}>
+        <SymbolView name={icon} size={15} tintColor={colors.color} />
+        <ThemedText type="code" style={{ color: colors.color }}>
+          {label}
+        </ThemedText>
+      </View>
       <ThemedText style={[styles.statValue, { color: colors.color }]} selectable>
         {value}
+      </ThemedText>
+      <ThemedText type="code" style={{ color: colors.color }} selectable>
+        {detail}
       </ThemedText>
     </View>
   );
@@ -294,11 +434,13 @@ function StatusPill({ progress }: { progress: CardLearningProgress }) {
 }
 
 function StatusActionButton({
+  icon,
   label,
   active,
   tone,
   onPress,
 }: {
+  icon: SymbolViewProps['name'];
   label: string;
   active: boolean;
   tone: 'amber' | 'green';
@@ -320,6 +462,7 @@ function StatusActionButton({
           opacity: pressed ? 0.72 : 1,
         },
       ]}>
+      <SymbolView name={icon} size={16} tintColor={colors.color} />
       <ThemedText type="smallBold" style={{ color: colors.color }}>
         {label}
       </ThemedText>
@@ -329,14 +472,26 @@ function StatusActionButton({
 
 function formatStatus(status: CardLearningStatus, nextReviewLabel: string) {
   if (status === 'known') {
-    return nextReviewLabel ? `OK・${nextReviewLabel}` : 'OK';
+    return nextReviewLabel ? `言えた・${nextReviewLabel}` : '言えた';
   }
 
   if (status === 'learning') {
-    return nextReviewLabel ? `まだ・${nextReviewLabel}` : 'まだ';
+    return nextReviewLabel ? `もう一回・${nextReviewLabel}` : 'もう一回';
   }
 
   return '未判定';
+}
+
+function getEmptyMessage(cardFilter: CardFilter) {
+  if (cardFilter === 'review') {
+    return '復習待ちのカードはありません。';
+  }
+
+  if (cardFilter === 'known') {
+    return '言えたカードはまだありません。';
+  }
+
+  return '表示できるカードはありません。';
 }
 
 function getStatusBorderColor(status: CardLearningStatus, palette: Palette) {
@@ -392,8 +547,26 @@ function getToneColors(tone: Tone, palette: Palette) {
 }
 
 const styles = StyleSheet.create({
-  topPanel: {
+  overviewPanel: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 22,
+    borderCurve: 'continuous',
+    padding: Spacing.three,
     gap: Spacing.three,
+  },
+  masteryHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.two,
+  },
+  masteryTrack: {
+    height: 8,
+    borderRadius: 999,
+    overflow: 'hidden',
+  },
+  masteryFill: {
+    height: '100%',
+    borderRadius: 999,
   },
   statsRow: {
     flexDirection: 'row',
@@ -402,13 +575,18 @@ const styles = StyleSheet.create({
   },
   statTile: {
     flex: 1,
-    minWidth: 100,
+    minWidth: 128,
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
     borderCurve: 'continuous',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
-    gap: Spacing.two,
+    gap: Spacing.one,
+  },
+  statHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
   },
   statValue: {
     fontSize: 28,
@@ -419,20 +597,39 @@ const styles = StyleSheet.create({
   deckSection: {
     gap: Spacing.three,
   },
-  optionRow: {
+  controlPanel: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    padding: Spacing.two,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
   },
-  filterButton: {
-    minHeight: 38,
-    borderWidth: StyleSheet.hairlineWidth,
+  controlBlock: {
+    flex: 1,
+    minWidth: 220,
+    gap: Spacing.one,
+  },
+  segmentedRow: {
+    minHeight: 44,
+    flexDirection: 'row',
     borderRadius: 14,
+    borderCurve: 'continuous',
+    padding: Spacing.one,
+    gap: Spacing.one,
+  },
+  filterButton: {
+    flex: 1,
+    minHeight: 36,
+    minWidth: 72,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 11,
     borderCurve: 'continuous',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
   },
   emptyPanel: {
     borderWidth: StyleSheet.hairlineWidth,
@@ -444,14 +641,25 @@ const styles = StyleSheet.create({
   cardGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.two,
+    gap: Spacing.three,
   },
   practiceCard: {
+    position: 'relative',
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 22,
+    borderRadius: 20,
     borderCurve: 'continuous',
     padding: Spacing.three,
+    paddingLeft: Spacing.three + Spacing.one,
     gap: Spacing.three,
+  },
+  statusStripe: {
+    position: 'absolute',
+    top: Spacing.three,
+    bottom: Spacing.three,
+    left: 0,
+    width: 4,
+    borderTopRightRadius: 999,
+    borderBottomRightRadius: 999,
   },
   cardMetaRow: {
     flexDirection: 'row',
@@ -460,6 +668,11 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
     flexWrap: 'wrap',
   },
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
   statusPill: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 999,
@@ -467,12 +680,15 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.one,
   },
   diaryTitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: 700,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: 800,
   },
   cardBody: {
-    gap: Spacing.two,
+    gap: Spacing.three,
+  },
+  languageBlock: {
+    gap: Spacing.one,
   },
   japaneseText: {
     fontSize: 17,
@@ -483,9 +699,9 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
   },
   englishText: {
-    fontSize: 20,
-    lineHeight: 30,
-    fontWeight: 700,
+    fontSize: 21,
+    lineHeight: 31,
+    fontWeight: 800,
   },
   cardActionRow: {
     flexDirection: 'row',
@@ -495,10 +711,12 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 44,
     borderWidth: 1,
-    borderRadius: 14,
+    borderRadius: 13,
     borderCurve: 'continuous',
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: Spacing.one,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
   },

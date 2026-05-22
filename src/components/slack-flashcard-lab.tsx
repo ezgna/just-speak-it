@@ -1,9 +1,12 @@
 import { SymbolView } from 'expo-symbols';
+import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
+  type TextLayoutEvent,
+  type TextStyle,
   unstable_batchedUpdates,
   useWindowDimensions,
   View,
@@ -70,6 +73,28 @@ const DeepCardScale = 0.88;
 const ActiveBackCardTranslateY = 12;
 const ActiveBackCardScale = 0.985;
 const DeepCardDragLag = 0.78;
+const PromptTextMetrics = {
+  fontSize: 29,
+  lineHeight: 39,
+};
+const AnswerTextMetrics = {
+  fontSize: 30,
+  lineHeight: 40,
+};
+const MinimumCardTextScale = 0.7;
+
+function getScaledCardTextStyle(isAnswerVisible: boolean, scale: number): TextStyle | undefined {
+  if (scale >= 1) {
+    return undefined;
+  }
+
+  const textMetrics = isAnswerVisible ? AnswerTextMetrics : PromptTextMetrics;
+
+  return {
+    fontSize: textMetrics.fontSize * scale,
+    lineHeight: textMetrics.lineHeight * scale,
+  };
+}
 
 export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabProps) {
   const { width, height } = useWindowDimensions();
@@ -81,6 +106,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   const promotionOwnerCardId = useSharedValue<string | null>(null);
   const trailingPromotionOwnerCardId = useSharedValue<string | null>(null);
   const decisionOwnerCardId = useSharedValue<string | null>(null);
+  const swipeHapticDecisionDirection = useSharedValue(0);
   const pendingStatusUpdatesRef = useRef<PendingStatusUpdate[]>([]);
   const [pendingDismissals, setPendingDismissals] = useState<PendingDismissals>({});
   const [pendingStatusUpdates, setPendingStatusUpdates] = useState<PendingStatusUpdate[]>([]);
@@ -172,11 +198,13 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
     promotionOwnerCardId.set(null);
     trailingPromotionOwnerCardId.set(null);
     decisionOwnerCardId.set(null);
+    swipeHapticDecisionDirection.set(0);
   }, [
     decisionOwnerCardId,
     promotionOwnerCardId,
     promotionProgress,
     resetCardTranslation,
+    swipeHapticDecisionDirection,
     swipeOwnerCardId,
     trailingPromotionOwnerCardId,
   ]);
@@ -249,6 +277,14 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
 
   const unlockVisualQueue = useCallback(() => {
     setVisualQueue(null);
+  }, []);
+
+  const playSwipeThresholdHaptic = useCallback(() => {
+    if (process.env.EXPO_OS === 'web') {
+      return;
+    }
+
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
   }, []);
 
   const completeSwipe = useCallback(
@@ -342,6 +378,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       promotionOwnerCardId.set(null);
       trailingPromotionOwnerCardId.set(null);
       promotionProgress.set(0);
+      swipeHapticDecisionDirection.set(0);
       translateX.set(
         withTiming(direction * swipeOutDistance, { duration: 190 }, (finished) => {
           if (finished) {
@@ -368,6 +405,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       promotionProgress,
       swipeOutDistance,
       swipeOwnerCardId,
+      swipeHapticDecisionDirection,
       trailingPromotionOwnerCardId,
       translateX,
       translateY,
@@ -384,6 +422,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
             promotionOwnerCardId.set(null);
             trailingPromotionOwnerCardId.set(null);
             promotionProgress.set(0);
+            swipeHapticDecisionDirection.set(0);
           }
         })
         .onUpdate((event) => {
@@ -397,6 +436,22 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
 
           translateX.set(event.translationX);
           translateY.set(event.translationY);
+
+          const decisionDirection =
+            event.translationX > swipeThreshold ? 1 : event.translationX < -swipeThreshold ? -1 : 0;
+          const currentHapticDecisionDirection = swipeHapticDecisionDirection.get();
+
+          if (decisionDirection === 0) {
+            if (currentHapticDecisionDirection !== 0) {
+              swipeHapticDecisionDirection.set(0);
+            }
+            return;
+          }
+
+          if (currentHapticDecisionDirection !== decisionDirection) {
+            swipeHapticDecisionDirection.set(decisionDirection);
+            runOnJS(playSwipeThresholdHaptic)();
+          }
         })
         .onEnd((event) => {
           if (decisionOwnerCardId.get()) {
@@ -419,6 +474,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
             promotionOwnerCardId.set(null);
             trailingPromotionOwnerCardId.set(null);
             promotionProgress.set(0);
+            swipeHapticDecisionDirection.set(0);
             return;
           }
 
@@ -430,6 +486,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
           }
 
           decisionOwnerCardId.set(activeCardId);
+          swipeHapticDecisionDirection.set(0);
           translateX.set(
             withTiming(direction * swipeOutDistance, { duration: 190 }, (finished) => {
               if (finished) {
@@ -453,10 +510,12 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       completeSwipe,
       decisionOwnerCardId,
       lockVisualQueue,
+      playSwipeThresholdHaptic,
       promotedCardId,
       promotionOwnerCardId,
       promotionProgress,
       swipeOutDistance,
+      swipeHapticDecisionDirection,
       swipeThreshold,
       swipeOwnerCardId,
       trailingPromotedCardId,
@@ -771,6 +830,44 @@ const SlackCardFace = memo(function SlackCardFace({
 }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const flipAccessibilityLabel = isAnswerVisible ? '日本語を表示する' : '英語を表示する';
+  const cardBodyText = isAnswerVisible ? card.english : card.japanese;
+  const cardBodyMaxLines = isAnswerVisible ? 7 : 8;
+  const cardBodyTextStyle = isAnswerVisible ? styles.answerText : styles.promptText;
+  const cardBodyMeasurementKey = `${card.id}:${isAnswerVisible ? 'answer' : 'prompt'}:${cardBodyText}`;
+  const [cardBodyMeasurement, setCardBodyMeasurement] = useState({
+    key: '',
+    lineCount: 0,
+  });
+  const measuredCardBodyLineCount =
+    cardBodyMeasurement.key === cardBodyMeasurementKey ? cardBodyMeasurement.lineCount : 0;
+  const cardBodyTextScale =
+    measuredCardBodyLineCount > cardBodyMaxLines
+      ? Math.max(MinimumCardTextScale, cardBodyMaxLines / measuredCardBodyLineCount)
+      : 1;
+  const scaledCardBodyTextStyle = useMemo(
+    () => getScaledCardTextStyle(isAnswerVisible, cardBodyTextScale),
+    [cardBodyTextScale, isAnswerVisible]
+  );
+  const handleCardBodyTextLayout = useCallback(
+    (event: TextLayoutEvent) => {
+      const lineCount = event.nativeEvent.lines.length;
+
+      setCardBodyMeasurement((currentMeasurement) => {
+        if (
+          currentMeasurement.key === cardBodyMeasurementKey &&
+          currentMeasurement.lineCount === lineCount
+        ) {
+          return currentMeasurement;
+        }
+
+        return {
+          key: cardBodyMeasurementKey,
+          lineCount,
+        };
+      });
+    },
+    [cardBodyMeasurementKey]
+  );
 
   useEffect(() => {
     if (isPreview) {
@@ -875,12 +972,19 @@ const SlackCardFace = memo(function SlackCardFace({
           onPress={onToggleAnswer}
           style={styles.answerTouchArea}>
           <ThemedText
-            style={isAnswerVisible ? styles.answerText : styles.promptText}
-            numberOfLines={isAnswerVisible ? 7 : 8}
-            adjustsFontSizeToFit
-            minimumFontScale={0.7}
+            accessibilityElementsHidden
+            accessible={false}
+            importantForAccessibility="no-hide-descendants"
+            onTextLayout={handleCardBodyTextLayout}
+            pointerEvents="none"
+            style={[cardBodyTextStyle, styles.cardBodyMeasurementText]}>
+            {cardBodyText}
+          </ThemedText>
+          <ThemedText
+            style={[cardBodyTextStyle, scaledCardBodyTextStyle]}
+            numberOfLines={cardBodyMaxLines}
             selectable>
-            {isAnswerVisible ? card.english : card.japanese}
+            {cardBodyText}
           </ThemedText>
         </Pressable>
 
@@ -1220,15 +1324,23 @@ const styles = StyleSheet.create({
   },
   promptText: {
     color: LabColors.text,
-    fontSize: 29,
-    lineHeight: 39,
+    fontSize: PromptTextMetrics.fontSize,
+    lineHeight: PromptTextMetrics.lineHeight,
     fontWeight: 900,
   },
   answerText: {
     color: LabColors.text,
-    fontSize: 30,
-    lineHeight: 40,
+    fontSize: AnswerTextMetrics.fontSize,
+    lineHeight: AnswerTextMetrics.lineHeight,
     fontWeight: 900,
+  },
+  cardBodyMeasurementText: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    left: 0,
+    color: 'transparent',
+    opacity: 0,
   },
   soundButton: {
     width: 40,

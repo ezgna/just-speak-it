@@ -181,6 +181,16 @@ export default function HomeScreen() {
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
+      <View style={styles.labEntry}>
+        <ActionButton
+          label="実験室"
+          icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+          variant="secondary"
+          onPress={() => router.push('/design-lab')}
+          style={styles.labButton}
+        />
+      </View>
+
       <ScrollView
         style={styles.scrollArea}
         contentContainerStyle={[
@@ -402,6 +412,13 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
+  },
+  labEntry: {
+    width: '100%',
+    maxWidth: MaxContentWidth,
+  },
+  labButton: {
+    minHeight: 58,
   },
   scrollContent: {
     flexGrow: 1,
