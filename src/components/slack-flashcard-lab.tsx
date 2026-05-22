@@ -11,6 +11,7 @@ import {
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import type { EdgeInsets } from 'react-native-safe-area-context';
 import Animated, {
+  Easing,
   Extrapolation,
   interpolate,
   interpolateColor,
@@ -56,13 +57,16 @@ const SpringConfig = {
   damping: 18,
   stiffness: 190,
 };
-const PromotionSpringConfig = {
-  damping: 13,
-  stiffness: 180,
-  mass: 0.72,
+const SwipeOutTiming = {
+  duration: 250,
+  easing: Easing.out(Easing.cubic),
 };
-const VisibleCardCount = 2;
-const DecisionCommitDelayMs = 34;
+const StackPromotionTiming = {
+  duration: 250,
+  easing: Easing.out(Easing.cubic),
+};
+const VisibleCardCount = 3;
+const TransitionReleaseDelayMs = 80;
 
 function SlackCardLayer({
   card,
@@ -72,10 +76,9 @@ function SlackCardLayer({
   isOutgoing,
   onToggleAnswer,
   position,
-  promotionOwnerCardId,
-  promotionProgress,
   swipeOwnerCardId,
   swipeThreshold,
+  stackProgress,
   translateX,
   translateY,
 }: {
@@ -86,38 +89,35 @@ function SlackCardLayer({
   isOutgoing: boolean;
   onToggleAnswer?: () => void;
   position: number;
-  promotionOwnerCardId: SharedValue<string | null>;
-  promotionProgress: SharedValue<number>;
   swipeOwnerCardId: SharedValue<string | null>;
   swipeThreshold: number;
+  stackProgress: SharedValue<number>;
   translateX: SharedValue<number>;
   translateY: SharedValue<number>;
 }) {
   const cardStyle = useAnimatedStyle(() => {
     const x = translateX.get();
     const y = translateY.get();
-    const absoluteX = Math.abs(x);
     const isSwipeOwner = swipeOwnerCardId.get() === card.id;
     const activeX = isSwipeOwner ? x : 0;
     const activeY = isSwipeOwner ? y : 0;
     const activeAbsoluteX = Math.abs(activeX);
+    const progress = stackProgress.get();
 
     if (position === 0) {
       return {
+        zIndex: 100,
         borderColor: interpolateColor(
           activeX,
           [-swipeThreshold, 0, swipeThreshold],
           [LabColors.keepBlue, 'rgba(255, 255, 255, 0.54)', LabColors.green]
         ),
-        opacity:
-          isOutgoing
-            ? 0
-            : interpolate(
-                activeAbsoluteX,
-                [0, swipeThreshold * 1.6],
-                [1, 0.94],
-                Extrapolation.CLAMP
-              ),
+        opacity: interpolate(
+          activeAbsoluteX,
+          [0, swipeThreshold * 1.6],
+          [1, 0.94],
+          Extrapolation.CLAMP
+        ),
         transform: [
           { translateX: activeX },
           { translateY: activeY },
@@ -141,33 +141,30 @@ function SlackCardLayer({
       };
     }
 
-    const isPromotionOwner = promotionOwnerCardId.get() === card.id;
-    const shouldPreviewSwipe = promotionOwnerCardId.get() === null;
-    const swipePreviewProgress = interpolate(
-      shouldPreviewSwipe || isPromotionOwner ? absoluteX : 0,
-      [0, swipeThreshold * 0.3, swipeThreshold],
-      [0, 0.45, 0.9],
-      Extrapolation.CLAMP
-    );
-    const promotion = isPromotionOwner ? promotionProgress.get() : 0;
-    const revealProgress = Math.max(swipePreviewProgress, promotion);
+    const visualPosition = Math.min(Math.max(position - progress, 0), 2);
 
     return {
-      opacity: interpolate(revealProgress, [0, 0.2, 1], [0, 0.44, 1], Extrapolation.CLAMP),
+      zIndex: Math.round(90 - visualPosition * 10),
+      opacity: interpolate(
+        visualPosition,
+        [0, 1, 2],
+        [1, 0.44, 0.16],
+        Extrapolation.CLAMP
+      ),
       transform: [
         {
           translateY: interpolate(
-            revealProgress,
-            [0, 1, 1.12],
-            [34, 0, -5],
+            visualPosition,
+            [0, 1, 2],
+            [0, 34, 52],
             Extrapolation.CLAMP
           ),
         },
         {
           scale: interpolate(
-            revealProgress,
-            [0, 1, 1.12],
-            [0.94, 1, 1.025],
+            visualPosition,
+            [0, 1, 2],
+            [1, 0.94, 0.9],
             Extrapolation.CLAMP
           ),
         },
@@ -210,14 +207,14 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   const { cardStatuses, restoreCardProgress, setCardStatus } = useCardLearningStatuses();
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
-  const promotionProgress = useSharedValue(0);
+  const stackProgress = useSharedValue(0);
   const swipeOwnerCardId = useSharedValue<string | null>(null);
-  const promotionOwnerCardId = useSharedValue<string | null>(null);
   const isDecisionAnimating = useSharedValue(false);
   const [pendingDismissals, setPendingDismissals] = useState<PendingDismissals>({});
   const [frontPinnedCard, setFrontPinnedCard] = useState<PracticeCard | null>(null);
   const [isAnswerVisible, setIsAnswerVisible] = useState(false);
   const [outgoingCardId, setOutgoingCardId] = useState<string | null>(null);
+  const [transitionQueue, setTransitionQueue] = useState<PracticeCard[] | null>(null);
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
 
   const horizontalPadding =
@@ -280,25 +277,20 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       ...availableQueue.filter((card) => card.id !== frontPinnedCard.id),
     ];
   }, [cardStatuses, frontPinnedCard, pendingDismissals, reviewQueue]);
-  const [visualQueueOverride, setVisualQueueOverride] = useState<PracticeCard[] | null>(null);
-  const [displayDueCountOverride, setDisplayDueCountOverride] = useState<number | null>(null);
-  const visualQueue = visualQueueOverride ?? displayQueue;
-  const displayDueCount = displayDueCountOverride ?? displayQueue.length;
+  const visualQueue = transitionQueue ?? displayQueue.slice(0, VisibleCardCount);
   const visibleCards = useMemo(
     () => visualQueue.slice(0, VisibleCardCount),
     [visualQueue]
   );
   const activeCard = visibleCards[0] ?? null;
-  const promotedCardId = visibleCards[1]?.id ?? null;
   const activeCardId = activeCard?.id ?? null;
 
   const resetPosition = useCallback(() => {
     translateX.set(0);
     translateY.set(0);
-    promotionProgress.set(0);
+    stackProgress.set(0);
     swipeOwnerCardId.set(null);
-    promotionOwnerCardId.set(null);
-  }, [promotionOwnerCardId, promotionProgress, swipeOwnerCardId, translateX, translateY]);
+  }, [stackProgress, swipeOwnerCardId, translateX, translateY]);
 
   useEffect(() => {
     if (isDecisionAnimating.get()) {
@@ -314,6 +306,13 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
     setIsAnswerVisible((currentValue) => !currentValue);
   }, []);
 
+  const beginDecisionVisuals = useCallback(
+    () => {
+      setTransitionQueue(displayQueue.slice(0, VisibleCardCount));
+    },
+    [displayQueue]
+  );
+
   const completeDecision = useCallback(
     (status: CardLearningStatus) => {
       if (!activeCard) {
@@ -324,43 +323,39 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
 
       const decidedCard = activeCard;
       const dismissedAt = new Date().toISOString();
-      const nextVisualQueue = visualQueue.filter((card) => card.id !== decidedCard.id);
+      const nextVisualQueue = displayQueue
+        .filter((card) => card.id !== decidedCard.id)
+        .slice(0, VisibleCardCount);
 
       unstable_batchedUpdates(() => {
-        setVisualQueueOverride(nextVisualQueue);
+        setTransitionQueue(nextVisualQueue);
         setOutgoingCardId(null);
         setIsAnswerVisible(false);
+        setUndoStack((currentStack) => [
+          ...currentStack.slice(-4),
+          {
+            card: decidedCard,
+            previousProgress: cardStatuses[decidedCard.id],
+          },
+        ]);
+        setPendingDismissals((currentDismissals) => ({
+          ...currentDismissals,
+          [decidedCard.id]: { dismissedAt },
+        }));
+        setFrontPinnedCard(null);
+        setCardStatus(decidedCard.id, status);
       });
 
-      setTimeout(() => {
+      requestAnimationFrame(() => {
         resetPosition();
 
-        unstable_batchedUpdates(() => {
-          setDisplayDueCountOverride(nextVisualQueue.length);
-          setUndoStack((currentStack) => [
-            ...currentStack.slice(-4),
-            {
-              card: decidedCard,
-              previousProgress: cardStatuses[decidedCard.id],
-            },
-          ]);
-          setPendingDismissals((currentDismissals) => ({
-            ...currentDismissals,
-            [decidedCard.id]: { dismissedAt },
-          }));
-          setFrontPinnedCard(null);
-          setCardStatus(decidedCard.id, status);
-        });
-
-        isDecisionAnimating.set(false);
-
         setTimeout(() => {
-          setVisualQueueOverride(null);
-          setDisplayDueCountOverride(null);
-        }, DecisionCommitDelayMs);
-      }, DecisionCommitDelayMs);
+          setTransitionQueue(null);
+          isDecisionAnimating.set(false);
+        }, TransitionReleaseDelayMs);
+      });
     },
-    [activeCard, cardStatuses, isDecisionAnimating, resetPosition, setCardStatus, visualQueue]
+    [activeCard, cardStatuses, displayQueue, isDecisionAnimating, resetPosition, setCardStatus]
   );
 
   const animateDecision = useCallback(
@@ -369,44 +364,33 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
         return;
       }
 
+      beginDecisionVisuals();
       isDecisionAnimating.set(true);
 
       const direction = status === 'known' ? 1 : -1;
 
       swipeOwnerCardId.set(activeCardId);
-      promotionOwnerCardId.set(null);
-      promotionProgress.set(0);
+      stackProgress.set(0);
       translateX.set(
-        withTiming(direction * swipeOutDistance, { duration: 210 }, (finished) => {
+        withTiming(direction * swipeOutDistance, SwipeOutTiming)
+      );
+      stackProgress.set(
+        withTiming(1, StackPromotionTiming, (finished) => {
           if (finished) {
-            runOnJS(setOutgoingCardId)(activeCardId);
-            if (promotedCardId) {
-              promotionOwnerCardId.set(promotedCardId);
-              promotionProgress.set(0);
-              promotionProgress.set(
-                withSpring(1, PromotionSpringConfig, (promoted) => {
-                  if (promoted) {
-                    runOnJS(completeDecision)(status);
-                  }
-                })
-              );
-            } else {
-              runOnJS(completeDecision)(status);
-            }
+            runOnJS(completeDecision)(status);
           }
         })
       );
-      translateY.set(withTiming(status === 'known' ? -16 : 16, { duration: 210 }));
+      translateY.set(withTiming(status === 'known' ? -18 : 18, SwipeOutTiming));
     },
     [
       activeCardId,
+      beginDecisionVisuals,
       completeDecision,
       isDecisionAnimating,
-      promotionOwnerCardId,
-      promotedCardId,
-      promotionProgress,
       swipeOutDistance,
       swipeOwnerCardId,
+      stackProgress,
       translateX,
       translateY,
     ]
@@ -424,8 +408,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       isDecisionAnimating.set(false);
       resetPosition();
       setOutgoingCardId(null);
-      setVisualQueueOverride(null);
-      setDisplayDueCountOverride(null);
+      setTransitionQueue(null);
       setPendingDismissals((currentDismissals) => {
         if (!(undoEntry.card.id in currentDismissals)) {
           return currentDismissals;
@@ -449,13 +432,17 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
         .onBegin(() => {
           if (activeCardId) {
             swipeOwnerCardId.set(activeCardId);
-            promotionOwnerCardId.set(null);
-            promotionProgress.set(0);
+            stackProgress.set(0);
           }
         })
         .onUpdate((event) => {
           translateX.set(event.translationX);
           translateY.set(event.translationY);
+          if (!isDecisionAnimating.get()) {
+            stackProgress.set(
+              Math.min((Math.abs(event.translationX) / swipeThreshold) * 0.65, 0.65)
+            );
+          }
         })
         .onEnd((event) => {
           const shouldDecide =
@@ -470,53 +457,40 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
               })
             );
             translateY.set(withSpring(0, SpringConfig));
-            promotionOwnerCardId.set(null);
-            promotionProgress.set(0);
+            stackProgress.set(withSpring(0, SpringConfig));
             return;
           }
 
           const status = event.translationX > 0 ? 'known' : 'learning';
           const direction = status === 'known' ? 1 : -1;
 
-          if (isDecisionAnimating.get()) {
+          if (!activeCardId || isDecisionAnimating.get()) {
             return;
           }
 
+          runOnJS(beginDecisionVisuals)();
           isDecisionAnimating.set(true);
           translateX.set(
-            withTiming(direction * swipeOutDistance, { duration: 210 }, (finished) => {
+            withTiming(direction * swipeOutDistance, SwipeOutTiming)
+          );
+          stackProgress.set(
+            withTiming(1, StackPromotionTiming, (finished) => {
               if (finished) {
-                if (activeCardId) {
-                  runOnJS(setOutgoingCardId)(activeCardId);
-                }
-                if (promotedCardId) {
-                  promotionOwnerCardId.set(promotedCardId);
-                  promotionProgress.set(0);
-                  promotionProgress.set(
-                    withSpring(1, PromotionSpringConfig, (promoted) => {
-                      if (promoted) {
-                        runOnJS(completeDecision)(status);
-                      }
-                    })
-                  );
-                } else {
-                  runOnJS(completeDecision)(status);
-                }
+                runOnJS(completeDecision)(status);
               }
             })
           );
-          translateY.set(withTiming(event.translationY * 0.32, { duration: 210 }));
+          translateY.set(withTiming(event.translationY * 0.32, SwipeOutTiming));
         }),
     [
       activeCardId,
+      beginDecisionVisuals,
       completeDecision,
       isDecisionAnimating,
-      promotionOwnerCardId,
-      promotedCardId,
-      promotionProgress,
       swipeOutDistance,
       swipeOwnerCardId,
       swipeThreshold,
+      stackProgress,
       translateX,
       translateY,
     ]
@@ -561,7 +535,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
     <Animated.View style={[styles.root, rootInsets]}>
       <View style={styles.content}>
         <LabHeader
-          dueCount={displayDueCount}
+          dueCount={displayQueue.length}
           onUndo={handleUndoPress}
           undoDisabled={undoStack.length === 0}
         />
@@ -579,10 +553,9 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
                   isOutgoing={card.id === outgoingCardId}
                   onToggleAnswer={position === 0 ? handleToggleAnswerPress : undefined}
                   position={position}
-                  promotionOwnerCardId={promotionOwnerCardId}
-                  promotionProgress={promotionProgress}
                   swipeOwnerCardId={swipeOwnerCardId}
                   swipeThreshold={swipeThreshold}
+                  stackProgress={stackProgress}
                   translateX={translateX}
                   translateY={translateY}
                 />
