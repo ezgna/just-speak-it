@@ -5,8 +5,6 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
-  type TextLayoutEvent,
-  type TextStyle,
   unstable_batchedUpdates,
   useWindowDimensions,
   View,
@@ -74,27 +72,13 @@ const ActiveBackCardTranslateY = 12;
 const ActiveBackCardScale = 0.985;
 const DeepCardDragLag = 0.78;
 const PromptTextMetrics = {
-  fontSize: 29,
-  lineHeight: 39,
+  fontSize: 27,
+  lineHeight: 37,
 };
 const AnswerTextMetrics = {
-  fontSize: 30,
-  lineHeight: 40,
+  fontSize: 28,
+  lineHeight: 38,
 };
-const MinimumCardTextScale = 0.7;
-
-function getScaledCardTextStyle(isAnswerVisible: boolean, scale: number): TextStyle | undefined {
-  if (scale >= 1) {
-    return undefined;
-  }
-
-  const textMetrics = isAnswerVisible ? AnswerTextMetrics : PromptTextMetrics;
-
-  return {
-    fontSize: textMetrics.fontSize * scale,
-    lineHeight: textMetrics.lineHeight * scale,
-  };
-}
 
 export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabProps) {
   const { width, height } = useWindowDimensions();
@@ -552,7 +536,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
                 今日の復習は完了です
               </ThemedText>
               <ThemedText style={styles.doneText} selectable>
-                次に復習日が来たカードから、この実験タブに戻ってきます。
+                次に復習日が来たカードから、この復習タブに戻ってきます。
               </ThemedText>
             </View>
           </View>
@@ -833,41 +817,6 @@ const SlackCardFace = memo(function SlackCardFace({
   const cardBodyText = isAnswerVisible ? card.english : card.japanese;
   const cardBodyMaxLines = isAnswerVisible ? 7 : 8;
   const cardBodyTextStyle = isAnswerVisible ? styles.answerText : styles.promptText;
-  const cardBodyMeasurementKey = `${card.id}:${isAnswerVisible ? 'answer' : 'prompt'}:${cardBodyText}`;
-  const [cardBodyMeasurement, setCardBodyMeasurement] = useState({
-    key: '',
-    lineCount: 0,
-  });
-  const measuredCardBodyLineCount =
-    cardBodyMeasurement.key === cardBodyMeasurementKey ? cardBodyMeasurement.lineCount : 0;
-  const cardBodyTextScale =
-    measuredCardBodyLineCount > cardBodyMaxLines
-      ? Math.max(MinimumCardTextScale, cardBodyMaxLines / measuredCardBodyLineCount)
-      : 1;
-  const scaledCardBodyTextStyle = useMemo(
-    () => getScaledCardTextStyle(isAnswerVisible, cardBodyTextScale),
-    [cardBodyTextScale, isAnswerVisible]
-  );
-  const handleCardBodyTextLayout = useCallback(
-    (event: TextLayoutEvent) => {
-      const lineCount = event.nativeEvent.lines.length;
-
-      setCardBodyMeasurement((currentMeasurement) => {
-        if (
-          currentMeasurement.key === cardBodyMeasurementKey &&
-          currentMeasurement.lineCount === lineCount
-        ) {
-          return currentMeasurement;
-        }
-
-        return {
-          key: cardBodyMeasurementKey,
-          lineCount,
-        };
-      });
-    },
-    [cardBodyMeasurementKey]
-  );
 
   useEffect(() => {
     if (isPreview) {
@@ -907,6 +856,19 @@ const SlackCardFace = memo(function SlackCardFace({
       onError: () => setIsSpeaking(false),
     });
   }, [card.english, isSpeaking]);
+  const tapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .enabled(!isPreview && typeof onToggleAnswer === 'function')
+        .maxDistance(8)
+        .maxDuration(260)
+        .onEnd((_event, success) => {
+          if (success && onToggleAnswer) {
+            runOnJS(onToggleAnswer)();
+          }
+        }),
+    [isPreview, onToggleAnswer]
+  );
 
   return (
     <View style={styles.cardFace}>
@@ -915,7 +877,7 @@ const SlackCardFace = memo(function SlackCardFace({
           <View style={styles.cardTopText}>
             <View style={styles.cardHeader}>
               <ThemedText style={styles.cardTitle} numberOfLines={2} selectable>
-                {card.diaryTitle}
+                {card.diaryExcerpt}
               </ThemedText>
             </View>
 
@@ -965,28 +927,21 @@ const SlackCardFace = memo(function SlackCardFace({
           </View>
         </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={flipAccessibilityLabel}
-          disabled={isPreview}
-          onPress={onToggleAnswer}
-          style={styles.answerTouchArea}>
-          <ThemedText
-            accessibilityElementsHidden
-            accessible={false}
-            importantForAccessibility="no-hide-descendants"
-            onTextLayout={handleCardBodyTextLayout}
-            pointerEvents="none"
-            style={[cardBodyTextStyle, styles.cardBodyMeasurementText]}>
-            {cardBodyText}
-          </ThemedText>
-          <ThemedText
-            style={[cardBodyTextStyle, scaledCardBodyTextStyle]}
-            numberOfLines={cardBodyMaxLines}
-            selectable>
-            {cardBodyText}
-          </ThemedText>
-        </Pressable>
+        <GestureDetector gesture={tapGesture}>
+          <View
+            accessible={!isPreview}
+            accessibilityRole="button"
+            accessibilityLabel={flipAccessibilityLabel}
+            onAccessibilityTap={onToggleAnswer}
+            style={styles.answerTouchArea}>
+            <ThemedText
+              style={cardBodyTextStyle}
+              numberOfLines={cardBodyMaxLines}
+              selectable>
+              {cardBodyText}
+            </ThemedText>
+          </View>
+        </GestureDetector>
 
       </View>
     </View>
@@ -1333,14 +1288,6 @@ const styles = StyleSheet.create({
     fontSize: AnswerTextMetrics.fontSize,
     lineHeight: AnswerTextMetrics.lineHeight,
     fontWeight: 900,
-  },
-  cardBodyMeasurementText: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    left: 0,
-    color: 'transparent',
-    opacity: 0,
   },
   soundButton: {
     width: 40,

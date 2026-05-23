@@ -293,8 +293,8 @@ function PracticeCardItem({
         <StatusPill progress={progress} />
       </View>
 
-      <ThemedText style={styles.diaryTitle} numberOfLines={2} selectable>
-        {card.diaryTitle}
+      <ThemedText style={styles.diaryExcerpt} numberOfLines={2} selectable>
+        {card.diaryExcerpt}
       </ThemedText>
 
       <View style={styles.cardBody}>
@@ -679,7 +679,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
   },
-  diaryTitle: {
+  diaryExcerpt: {
     fontSize: 15,
     lineHeight: 21,
     fontWeight: 800,

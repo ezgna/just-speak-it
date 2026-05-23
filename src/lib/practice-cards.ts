@@ -2,7 +2,8 @@ import type { TranslationCard, TranslationCardGroup } from '@/lib/backend/practi
 import type { CardLearningStatus } from '@/lib/card-learning-statuses';
 
 export type PracticeCard = TranslationCard & {
-  diaryTitle: string;
+  diaryText: string;
+  diaryExcerpt: string;
   diaryCreatedAt: string;
   source: TranslationCardGroup['source'];
 };
@@ -17,7 +18,8 @@ export function flattenTranslationCardGroups(groups: TranslationCardGroup[]): Pr
   return groups.flatMap((group) =>
     group.cards.map((card) => ({
       ...card,
-      diaryTitle: group.title,
+      diaryText: group.diaryText,
+      diaryExcerpt: group.diaryExcerpt,
       diaryCreatedAt: group.createdAt,
       source: group.source,
     }))
@@ -29,8 +31,4 @@ export function formatPracticeDate(value: string) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value));
-}
-
-export function formatPracticeSource(source: TranslationCardGroup['source']) {
-  return source === 'text' ? 'テキスト' : '音声';
 }

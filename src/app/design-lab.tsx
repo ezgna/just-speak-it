@@ -100,44 +100,32 @@ function ButtonSourceSample({ children, label }: { children: ReactNode; label: s
 type DiaryConceptEntry = {
   id: string;
   date: string;
-  title: string;
   body: string;
-  cardCount: number;
-  source: string;
-  accent: string;
+  color: string;
 };
 
 const DiaryConceptEntries: DiaryConceptEntry[] = [
   {
     id: 'bakery',
     date: '今日 18:42',
-    title: '帰り道のパン屋',
-    body: '今日は帰り道に、ずっと気になっていたパン屋に寄りました。',
-    cardCount: 4,
-    source: '音声',
-    accent: '#276EF1',
+    body: '今日は帰り道に、ずっと気になっていたパン屋に寄りました。店内は思っていたより静かで、夕方の光が棚の奥まで入っていて、少しだけ気持ちが落ち着きました。',
+    color: '#FFF9EC',
   },
   {
     id: 'meeting',
     date: '昨日 09:18',
-    title: '朝の会議',
-    body: '朝の会議で話したことを、あとで英語でも説明できるようにしたいです。',
-    cardCount: 3,
-    source: '手入力',
-    accent: '#2FDD6C',
+    body: '朝の会議で話した内容を、あとで英語でも説明できるようにしたいと思いました。言いたいこと自体はあるのに、英語にしようとすると急に細かい部分が抜けてしまいます。',
+    color: '#FFFFFF',
   },
   {
     id: 'shopping',
     date: '5月20日',
-    title: '疲れていた日の買い物',
-    body: '今日は少し疲れていたけれど、帰る前に買い物だけ済ませました。',
-    cardCount: 2,
-    source: '音声',
-    accent: '#FF7661',
+    body: '今日は少し疲れていたけれど、帰る前に買い物だけ済ませました。早く帰りたい気持ちもあったけれど、明日の朝に慌てずに済むと思うと、やっておいてよかったです。',
+    color: '#FFF8EA',
   },
 ];
 
-function DiaryTabConcept({ columnWidth }: { columnWidth: ViewStyle['width'] }) {
+function DiaryTabConcept() {
   return (
     <View style={styles.diaryTabMockup}>
       <View style={styles.diaryHero}>
@@ -146,109 +134,30 @@ function DiaryTabConcept({ columnWidth }: { columnWidth: ViewStyle['width'] }) {
             <ThemedText style={styles.diaryHeroKickerText}>日記タブ案</ThemedText>
           </View>
           <ThemedText style={styles.diaryHeroTitle} selectable>
-            今日のことば置き場
+            紙片スタック
           </ThemedText>
           <ThemedText style={styles.diaryHeroText} selectable>
-            書いた日記を、英語カードへ送る前の素材として扱う一覧画面。
+            日時と本文だけを残して、話したことがそのまま積み上がる読み物。
           </ThemedText>
         </View>
-        <View style={styles.diaryHeroActions}>
-          <GlideButton
-            label="今日を書く"
-            tone="blue"
-            caption="new diary"
-            icon={{ ios: 'pencil', android: 'edit', web: 'edit' }}
-          />
-          <GlideButton
-            label="音声で残す"
-            tone="cream"
-            icon={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
-            iconSide="left"
-            size="compact"
-            fullWidth={false}
-          />
-        </View>
       </View>
 
-      <View style={styles.diarySummaryRow}>
-        <DiarySummaryPuck label="日記" value="12" color="#FFF9EC" />
-        <DiarySummaryPuck label="カード" value="31" color="#2FDD6C" />
-        <DiarySummaryPuck label="今週" value="5" color="#FFE2A6" />
-      </View>
-
-      <View style={styles.diaryBodyGrid}>
-        <View style={[styles.diaryBodyColumn, { width: columnWidth }]}>
-          <DiaryFocusCard />
-        </View>
-        <View style={[styles.diaryBodyColumn, { width: columnWidth }]}>
-          <View style={styles.diaryTimeline}>
-            {DiaryConceptEntries.map((entry) => (
-              <DiaryTimelineItem key={entry.id} entry={entry} />
-            ))}
-          </View>
-        </View>
+      <View style={styles.diaryPaperList}>
+        {DiaryConceptEntries.map((entry) => (
+          <DiaryConceptPaper key={entry.id} entry={entry} />
+        ))}
       </View>
     </View>
   );
 }
 
-function DiarySummaryPuck({ color, label, value }: { color: string; label: string; value: string }) {
+function DiaryConceptPaper({ entry }: { entry: DiaryConceptEntry }) {
   return (
-    <View style={[styles.diarySummaryPuck, { backgroundColor: color }]}>
-      <ThemedText style={styles.diarySummaryValue}>{value}</ThemedText>
-      <ThemedText style={styles.diarySummaryLabel}>{label}</ThemedText>
-    </View>
-  );
-}
-
-function DiaryFocusCard() {
-  return (
-    <RaisedPanel surfaceColor="#111111" style={styles.diaryFocusCard}>
-      <View style={styles.diaryFocusTopRow}>
-        <View style={styles.diaryFocusMark}>
-          <SymbolView
-            name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-            size={16}
-            tintColor="#111111"
-          />
-        </View>
-        <ThemedText style={styles.diaryFocusDate}>今日 18:42</ThemedText>
-      </View>
-
-      <View style={styles.diaryFocusBody}>
-        <ThemedText style={styles.diaryFocusTitle} selectable>
-          帰り道のパン屋
-        </ThemedText>
-        <ThemedText style={styles.diaryFocusText} selectable>
-          今日は帰り道に、ずっと気になっていたパン屋に寄りました。
-        </ThemedText>
-      </View>
-
-      <View style={styles.diaryFocusFooter}>
-        <View style={styles.diaryCardCountBadge}>
-          <ThemedText style={styles.diaryCardCountText}>英語カード4件</ThemedText>
-        </View>
-        <GlideButton label="全文" tone="mint" size="compact" fullWidth={false} />
-      </View>
-    </RaisedPanel>
-  );
-}
-
-function DiaryTimelineItem({ entry }: { entry: DiaryConceptEntry }) {
-  return (
-    <View style={styles.diaryTimelineItem}>
-      <View style={[styles.diaryTimelineDot, { backgroundColor: entry.accent }]} />
-      <View style={styles.diaryTimelineContent}>
-        <View style={styles.diaryTimelineMeta}>
-          <ThemedText style={styles.diaryTimelineDate}>{entry.date}</ThemedText>
-          <ThemedText style={styles.diaryTimelineSource}>
-            {entry.source} / {entry.cardCount}件
-          </ThemedText>
-        </View>
-        <ThemedText style={styles.diaryTimelineTitle} selectable>
-          {entry.title}
-        </ThemedText>
-        <ThemedText style={styles.diaryTimelineBody} numberOfLines={2} selectable>
+    <View style={styles.diaryPaperStack}>
+      <View style={styles.diaryPaperBack} />
+      <View style={[styles.diaryPaper, { backgroundColor: entry.color }]}>
+        <ThemedText style={styles.diaryPaperDate}>{entry.date}</ThemedText>
+        <ThemedText style={styles.diaryPaperBody} selectable>
           {entry.body}
         </ThemedText>
       </View>
@@ -431,7 +340,6 @@ export default function DesignLabScreen() {
   const palette = useDailyPalette();
   const { width } = useWindowDimensions();
   const boardColumnWidth: ViewStyle['width'] = width >= 760 ? '48.2%' : '100%';
-  const diaryColumnWidth: ViewStyle['width'] = width >= 760 ? '48.2%' : '100%';
 
   return (
     <FoundationSurfacePressDelayProvider pressDelay={FOUNDATION_SCROLL_PRESS_DELAY_MS}>
@@ -455,7 +363,7 @@ export default function DesignLabScreen() {
 
           <ButtonSourceShelf />
 
-          <DiaryTabConcept columnWidth={diaryColumnWidth} />
+          <DiaryTabConcept />
 
           <View style={styles.pressboard}>
             <PressboardHeader />
@@ -602,166 +510,45 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     fontWeight: 800,
   },
-  diaryHeroActions: {
-    minWidth: 220,
-    gap: Spacing.two,
-    alignItems: 'flex-start',
-  },
-  diarySummaryRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  diarySummaryPuck: {
-    flexGrow: 1,
-    flexBasis: 92,
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    borderWidth: 3,
-    borderColor: '#111111',
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.two,
-    alignItems: 'center',
-  },
-  diarySummaryValue: {
-    color: '#111111',
-    fontSize: 27,
-    lineHeight: 31,
-    fontWeight: 900,
-    fontVariant: ['tabular-nums'],
-  },
-  diarySummaryLabel: {
-    color: '#111111',
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: 900,
-  },
-  diaryBodyGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.three,
-    alignItems: 'stretch',
-  },
-  diaryBodyColumn: {
+  diaryPaperList: {
     gap: Spacing.three,
   },
-  diaryFocusCard: {
-    minHeight: 292,
+  diaryPaperStack: {
+    position: 'relative',
+    paddingRight: 9,
+    paddingBottom: 10,
   },
-  diaryFocusTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  diaryFocusMark: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    borderCurve: 'continuous',
-    backgroundColor: '#2FDD6C',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  diaryFocusDate: {
-    color: '#A8F3C0',
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: 900,
-  },
-  diaryFocusBody: {
-    gap: Spacing.two,
-  },
-  diaryFocusTitle: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    lineHeight: 30,
-    fontWeight: 900,
-  },
-  diaryFocusText: {
-    color: '#F2F7F4',
-    fontSize: 17,
-    lineHeight: 27,
-    fontWeight: 800,
-  },
-  diaryFocusFooter: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  diaryCardCountBadge: {
-    borderRadius: 999,
-    backgroundColor: '#FFF9EC',
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-  },
-  diaryCardCountText: {
-    color: '#111111',
-    fontSize: 12,
-    lineHeight: 15,
-    fontWeight: 900,
-  },
-  diaryTimeline: {
+  diaryPaperBack: {
+    position: 'absolute',
+    left: 9,
+    top: 10,
+    right: 0,
+    bottom: 0,
     borderRadius: 20,
     borderCurve: 'continuous',
     borderWidth: 3,
     borderColor: '#111111',
-    backgroundColor: '#FFF9EC',
-    padding: Spacing.two,
-    gap: Spacing.two,
+    backgroundColor: '#BDEBDD',
   },
-  diaryTimelineItem: {
-    flexDirection: 'row',
-    gap: Spacing.two,
-    borderRadius: 16,
+  diaryPaper: {
+    borderRadius: 20,
     borderCurve: 'continuous',
-    backgroundColor: '#FFFFFF',
-    padding: Spacing.two,
-  },
-  diaryTimelineDot: {
-    width: 14,
-    height: 14,
-    borderRadius: 999,
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: '#111111',
-    marginTop: 3,
+    gap: Spacing.two,
+    padding: Spacing.three,
   },
-  diaryTimelineContent: {
-    flex: 1,
-    minWidth: 0,
-    gap: Spacing.one,
-  },
-  diaryTimelineMeta: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    gap: Spacing.one,
-  },
-  diaryTimelineDate: {
+  diaryPaperDate: {
     color: '#088A81',
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 16,
     fontWeight: 900,
   },
-  diaryTimelineSource: {
-    color: '#6E604C',
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: 900,
-  },
-  diaryTimelineTitle: {
+  diaryPaperBody: {
     color: '#111111',
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: 900,
-  },
-  diaryTimelineBody: {
-    color: '#4E594F',
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: 700,
+    fontSize: 17,
+    lineHeight: 28,
+    fontWeight: 800,
   },
   pressboard: {
     borderRadius: 26,

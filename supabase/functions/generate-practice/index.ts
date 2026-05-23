@@ -7,8 +7,7 @@ type TranslationCard = {
 };
 
 type GeneratePracticeOutput = {
-  title: string;
-  summaryPoints: string[];
+  diaryText: string;
   cards: TranslationCard[];
 };
 
@@ -16,13 +15,11 @@ type DiaryEntryRow = {
   id: string;
   user_id: string;
   source: 'text' | 'voice';
-  title: string;
-  summary_points: unknown;
   raw_transcript_text: string;
-  cleaned_text: string;
+  body_text: string;
   content_hash: string;
-  generation_status: 'processing' | 'completed' | 'failed';
-  generation_error: string | null;
+  practice_generation_status: 'processing' | 'completed' | 'failed';
+  practice_generation_error: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -30,16 +27,10 @@ type DiaryEntryRow = {
 const translationCardSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['title', 'summaryPoints', 'cards'],
+  required: ['diaryText', 'cards'],
   properties: {
-    title: {
+    diaryText: {
       type: 'string',
-    },
-    summaryPoints: {
-      type: 'array',
-      minItems: 1,
-      maxItems: 3,
-      items: { type: 'string' },
     },
     cards: {
       type: 'array',
@@ -58,7 +49,7 @@ const translationCardSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, title, summary_points, raw_transcript_text, cleaned_text, content_hash, generation_status, generation_error, created_at, updated_at';
+  'id, user_id, source, raw_transcript_text, body_text, content_hash, practice_generation_status, practice_generation_error, created_at, updated_at';
 const translationCardSelect = 'id, diary_entry_id, sort_order, japanese, english, created_at';
 const existingGenerationWaitAttempts = 20;
 const existingGenerationWaitMs = 600;
@@ -96,7 +87,7 @@ export default {
           : cleanedText;
 
     if (!cleanedText) {
-      return errorResponse('cleanedTextが必要です。');
+      return errorResponse('日記本文が必要です。');
     }
 
     const source = body?.source === 'text' ? 'text' : 'voice';
@@ -135,13 +126,12 @@ export default {
       schema: translationCardSchema,
       instructions: [
         'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
-        '入力は日本語の文字起こしです。まず全体の意味を理解し、英語ならどこまでを一文にするのが自然かを逆算してください。',
-        'title は日記一覧で最初に表示する日本語の一行タイトルです。本文の主題がすぐ思い出せる10〜22文字程度にしてください。',
-        'title は名詞句または短い見出しにしてください。「今日の記録」のような汎用タイトルや文末の句点は避けてください。',
-        'summaryPoints は日記一覧で箇条書き表示する日本語の要点です。内容量に応じて1〜3個にしてください。',
-        '短い入力や要点が少ない入力なら1個で十分です。無理に増やさないでください。',
-        'summaryPoints はそれぞれ12〜32文字程度で、感情・出来事・気づきが思い出せる短い文にしてください。',
-        'summaryPoints は本文の違う側面を拾ってください。文末の句点は付けないでください。',
+        '入力は日本語の文字起こし、またはそれを軽く整えた文章です。',
+        'diaryText は日記タブにそのまま全文表示する日本語本文です。',
+        'diaryText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
+        'diaryText は話者の事実と温度感を保ったまま、読める日記文として句読点と文の流れだけを整えてください。',
+        '意味を足さないでください。削りすぎないでください。短い入力は短い日記文のままで構いません。',
+        'そのうえで、英語ならどこまでを一文にするのが自然かを逆算してください。',
         '日本語の句点や話し言葉の切れ目に引きずられず、英語ネイティブが自然に言う一文ごとのカードに分けてください。',
         '各カードは japanese と english の一対一にしてください。',
         'japanese は、その english に対応する日本語の意味の塊だけを入れてください。文の途中で不自然に切らないでください。',
@@ -158,8 +148,7 @@ export default {
       );
       throw error;
     });
-    const title = normalizeTitle(output.title, cleanedText);
-    const summaryPoints = normalizeSummaryPoints(output.summaryPoints);
+    const bodyText = normalizeDiaryText(output.diaryText, cleanedText);
 
     const cardDrafts = output.cards
       .map((card, index) => ({
@@ -168,15 +157,6 @@ export default {
         english: card.english.trim(),
       }))
       .filter((card) => card.japanese && card.english);
-
-    if (summaryPoints.length < 1) {
-      await markGenerationFailed(
-        generationContext,
-        claimedDiaryEntry.id,
-        '日記の要点を作成できませんでした。'
-      );
-      return errorResponse('日記の要点を作成できませんでした。', 502);
-    }
 
     if (cardDrafts.length === 0) {
       await markGenerationFailed(
@@ -191,11 +171,9 @@ export default {
       .from('diary_entries')
       .update({
         source,
-        title,
-        summary_points: summaryPoints,
         raw_transcript_text: rawTranscriptText,
-        cleaned_text: cleanedText,
-        generation_error: null,
+        body_text: bodyText,
+        practice_generation_error: null,
       })
       .eq('id', claimedDiaryEntry.id)
       .select(diaryEntrySelect)
@@ -237,8 +215,8 @@ export default {
     const { data: completedDiaryEntry, error: completeError } = await generationContext.supabase
       .from('diary_entries')
       .update({
-        generation_status: 'completed',
-        generation_error: null,
+        practice_generation_status: 'completed',
+        practice_generation_error: null,
       })
       .eq('id', claimedDiaryEntry.id)
       .select(diaryEntrySelect)
@@ -278,13 +256,11 @@ async function claimDiaryEntryForGeneration(
     .insert({
       user_id: userId,
       source,
-      title: '日記の記録',
-      summary_points: [],
       raw_transcript_text: rawTranscriptText,
-      cleaned_text: cleanedText,
+      body_text: cleanedText,
       content_hash: contentHash,
-      generation_status: 'processing',
-      generation_error: null,
+      practice_generation_status: 'processing',
+      practice_generation_error: null,
     })
     .select(diaryEntrySelect)
     .single();
@@ -346,7 +322,7 @@ async function waitForExistingPractice(
       return { type: 'busy' as const };
     }
 
-    if (existingDiaryEntry.diaryEntry.generation_status === 'completed') {
+    if (existingDiaryEntry.diaryEntry.practice_generation_status === 'completed') {
       const cards = await fetchDiaryEntryCards(context, existingDiaryEntry.diaryEntry.id);
 
       if (cards.type === 'error') {
@@ -362,7 +338,7 @@ async function waitForExistingPractice(
       }
     }
 
-    if (existingDiaryEntry.diaryEntry.generation_status === 'failed') {
+    if (existingDiaryEntry.diaryEntry.practice_generation_status === 'failed') {
       return {
         type: 'failed' as const,
         diaryEntry: existingDiaryEntry.diaryEntry,
@@ -370,7 +346,7 @@ async function waitForExistingPractice(
     }
 
     if (
-      existingDiaryEntry.diaryEntry.generation_status === 'processing' &&
+      existingDiaryEntry.diaryEntry.practice_generation_status === 'processing' &&
       isProcessingStale(existingDiaryEntry.diaryEntry)
     ) {
       return {
@@ -436,12 +412,12 @@ async function claimExistingDiaryEntryForRetry(
     .update({
       source,
       raw_transcript_text: rawTranscriptText,
-      cleaned_text: cleanedText,
-      generation_status: 'processing',
-      generation_error: null,
+      body_text: cleanedText,
+      practice_generation_status: 'processing',
+      practice_generation_error: null,
     })
     .eq('id', diaryEntry.id)
-    .eq('generation_status', diaryEntry.generation_status)
+    .eq('practice_generation_status', diaryEntry.practice_generation_status)
     .select(diaryEntrySelect)
     .maybeSingle();
 
@@ -470,8 +446,8 @@ async function markGenerationFailed(context: { supabase: any }, diaryEntryId: st
   await context.supabase
     .from('diary_entries')
     .update({
-      generation_status: 'failed',
-      generation_error: message,
+      practice_generation_status: 'failed',
+      practice_generation_error: message,
     })
     .eq('id', diaryEntryId);
 }
@@ -506,55 +482,18 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     id: diaryEntry.id,
     user_id: diaryEntry.user_id,
     source: diaryEntry.source,
-    title: diaryEntry.title,
-    summary_points: diaryEntry.summary_points,
     raw_transcript_text: diaryEntry.raw_transcript_text,
-    cleaned_text: diaryEntry.cleaned_text,
+    body_text: diaryEntry.body_text,
     created_at: diaryEntry.created_at,
   };
 }
 
-function normalizeTitle(title: string, fallbackText: string) {
-  const normalizedTitle = title.replace(/\s+/g, ' ').replace(/[。．.]+$/g, '').trim();
+function normalizeDiaryText(value: string, fallbackText: string) {
+  const normalizedText = value.replace(/\n{3,}/g, '\n\n').trim();
 
-  if (normalizedTitle) {
-    return truncateTitle(normalizedTitle);
+  if (normalizedText) {
+    return normalizedText;
   }
 
-  const normalizedFallback = fallbackText.replace(/\s+/g, ' ').replace(/[。．.]+$/g, '').trim();
-
-  if (normalizedFallback) {
-    return truncateTitle(normalizedFallback);
-  }
-
-  return '日記の記録';
-}
-
-function truncateTitle(value: string) {
-  const chars = Array.from(value);
-
-  if (chars.length <= 28) {
-    return value;
-  }
-
-  return `${chars.slice(0, 27).join('')}…`;
-}
-
-function normalizeSummaryPoints(points: string[]) {
-  const normalizedPoints = points
-    .map((point) => point.replace(/\s+/g, ' ').replace(/[。．.]+$/g, '').trim())
-    .filter(Boolean)
-    .map(truncateSummaryPoint);
-
-  return Array.from(new Set(normalizedPoints)).slice(0, 3);
-}
-
-function truncateSummaryPoint(value: string) {
-  const chars = Array.from(value);
-
-  if (chars.length <= 34) {
-    return value;
-  }
-
-  return `${chars.slice(0, 33).join('')}…`;
+  return fallbackText.replace(/\n{3,}/g, '\n\n').trim();
 }

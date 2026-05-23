@@ -1,6 +1,5 @@
-import { SymbolView } from 'expo-symbols';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/daily-to-english-ui';
@@ -10,6 +9,7 @@ import { listDiaryEntries, type DiaryEntry } from '@/lib/backend/practice';
 import { subscribeToPracticeRefresh } from '@/lib/practice-refresh';
 
 type LoadMode = 'initial' | 'refresh' | 'sync';
+type Palette = ReturnType<typeof useDailyPalette>;
 
 export default function DiaryScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -18,7 +18,6 @@ export default function DiaryScreen() {
   const isLoadingEntriesRef = useRef(false);
   const shouldSyncAfterCurrentLoadRef = useRef(false);
   const [entries, setEntries] = useState<DiaryEntry[]>([]);
-  const [expandedEntryIds, setExpandedEntryIds] = useState<Set<string>>(() => new Set());
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -90,20 +89,6 @@ export default function DiaryScreen() {
     void loadEntries('refresh');
   }, [loadEntries]);
 
-  const toggleEntry = useCallback((entryId: string) => {
-    setExpandedEntryIds((currentIds) => {
-      const nextIds = new Set(currentIds);
-
-      if (nextIds.has(entryId)) {
-        nextIds.delete(entryId);
-      } else {
-        nextIds.add(entryId);
-      }
-
-      return nextIds;
-    });
-  }, []);
-
   useEffect(() => {
     isMountedRef.current = true;
     const timeoutId = setTimeout(() => {
@@ -139,11 +124,12 @@ export default function DiaryScreen() {
 
   return (
     <ScrollView
+      contentInsetAdjustmentBehavior="automatic"
       style={[styles.scrollView, { backgroundColor: palette.background }]}
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: safeAreaInsets.top,
+          paddingTop: safeAreaInsets.top + Spacing.two,
           paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
@@ -160,22 +146,16 @@ export default function DiaryScreen() {
         )}
 
         {!isInitialLoading && entries.length === 0 && !errorMessage && (
-          <View style={styles.centerState}>
-            <ThemedText type="title" selectable>
-              日記
-            </ThemedText>
-            <ThemedText themeColor="textSecondary" selectable>
-              まだ日記はありません。
+          <View style={styles.emptyState}>
+            <ThemedText style={[styles.emptyText, { color: palette.textSecondary }]} selectable>
+              まだ積まれた日記はありません。
             </ThemedText>
           </View>
         )}
 
         {errorMessage && entries.length === 0 && (
-          <View style={styles.centerState}>
-            <ThemedText type="title" selectable>
-              日記
-            </ThemedText>
-            <ThemedText style={{ color: palette.coral }} selectable>
+          <View style={styles.emptyState}>
+            <ThemedText style={[styles.emptyText, { color: palette.coral }]} selectable>
               {errorMessage}
             </ThemedText>
           </View>
@@ -196,88 +176,68 @@ export default function DiaryScreen() {
           </View>
         )}
 
-        {entries.map((entry) => {
-          const isExpanded = expandedEntryIds.has(entry.id);
-          const summaryPoints = entry.summaryPoints ?? [];
-
-          return (
-            <View
-              key={entry.id}
-              style={[
-                styles.entryCard,
-                {
-                  backgroundColor: palette.card,
-                  borderColor: palette.border,
-                  boxShadow: palette.shadow,
-                },
-              ]}>
-              <View style={styles.entryMetaRow}>
-                <ThemedText type="code" themeColor="textSecondary" selectable>
-                  {formatDate(entry.createdAt)}
-                </ThemedText>
-                <ThemedText type="code" themeColor="textSecondary" selectable>
-                  {formatSource(entry.source)} / {formatCardCount(entry.cardCount)}
-                </ThemedText>
-              </View>
-
-              <ThemedText style={styles.entryTitle} numberOfLines={2} selectable>
-                {entry.title}
-              </ThemedText>
-
-              {summaryPoints.length > 0 && (
-                <View style={styles.summaryList}>
-                  {summaryPoints.map((point, index) => (
-                    <View key={`${entry.id}-${index}`} style={styles.summaryRow}>
-                      <View style={[styles.summaryBullet, { backgroundColor: palette.teal }]} />
-                      <ThemedText style={styles.summaryText} selectable>
-                        {point}
-                      </ThemedText>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {!isExpanded && (
-                <ThemedText
-                  style={styles.previewText}
-                  themeColor="textSecondary"
-                  numberOfLines={2}
-                  selectable>
-                  {formatPreview(entry.transcriptText)}
-                </ThemedText>
-              )}
-
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ expanded: isExpanded }}
-                style={({ pressed }) => [
-                  styles.bodyToggle,
-                  { borderTopColor: palette.border },
-                  pressed && styles.pressedToggle,
-                ]}
-                onPress={() => toggleEntry(entry.id)}>
-                <ThemedText type="smallBold" themeColor="textSecondary">
-                  {isExpanded ? '本文を閉じる' : '全文を読む'}
-                </ThemedText>
-                <SymbolView
-                  name={{ ios: 'chevron.down', android: 'keyboard_arrow_down', web: 'keyboard_arrow_down' }}
-                  size={18}
-                  weight="bold"
-                  tintColor={palette.textSecondary}
-                  style={{ transform: [{ rotate: isExpanded ? '180deg' : '0deg' }] }}
-                />
-              </Pressable>
-
-              {isExpanded && (
-                <ThemedText style={styles.transcriptText} selectable>
-                  {entry.transcriptText}
-                </ThemedText>
-              )}
-            </View>
-          );
-        })}
+        {entries.length > 0 && (
+          <View style={styles.paperList}>
+            {entries.map((entry, index) => (
+              <DiaryPaper key={entry.id} entry={entry} index={index} palette={palette} />
+            ))}
+          </View>
+        )}
       </View>
     </ScrollView>
+  );
+}
+
+function DiaryPaper({
+  entry,
+  index,
+  palette,
+}: {
+  entry: DiaryEntry;
+  index: number;
+  palette: Palette;
+}) {
+  const paperColor = getPaperColor(index, palette);
+
+  return (
+    <View style={styles.paperStack}>
+      <View
+        pointerEvents="none"
+        style={[
+          styles.paperBackLayer,
+          {
+            backgroundColor: palette.cardAlt,
+            borderColor: palette.border,
+          },
+        ]}
+      />
+      <View
+        pointerEvents="none"
+        style={[
+          styles.paperMiddleLayer,
+          {
+            backgroundColor: palette.backgroundElement,
+            borderColor: palette.border,
+          },
+        ]}
+      />
+      <View
+        style={[
+          styles.entryPaper,
+          {
+            backgroundColor: paperColor,
+            borderColor: palette.border,
+            boxShadow: palette.shadow,
+          },
+        ]}>
+        <ThemedText type="code" style={{ color: palette.textSecondary }} selectable>
+          {formatDate(entry.createdAt)}
+        </ThemedText>
+        <ThemedText style={[styles.bodyText, { color: palette.text }]} selectable>
+          {entry.bodyText}
+        </ThemedText>
+      </View>
+    </View>
   );
 }
 
@@ -288,22 +248,9 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function formatSource(source: DiaryEntry['source']) {
-  return source === 'text' ? 'テキスト' : '音声';
-}
-
-function formatCardCount(count: number) {
-  return `英語カード${count}件`;
-}
-
-function formatPreview(value: string) {
-  const normalizedValue = value.replace(/\s+/g, ' ').trim();
-
-  if (!normalizedValue) {
-    return '本文はありません。';
-  }
-
-  return normalizedValue;
+function getPaperColor(index: number, palette: Palette) {
+  const colors = [palette.card, palette.cardAlt, '#FFF8EA'];
+  return colors[index % colors.length];
 }
 
 const styles = StyleSheet.create({
@@ -331,69 +278,53 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
     padding: Spacing.three,
   },
-  centerState: {
+  emptyState: {
     minHeight: 360,
     justifyContent: 'center',
-    gap: Spacing.three,
   },
-  entryCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 24,
-    borderCurve: 'continuous',
-    padding: Spacing.four,
-    gap: Spacing.three,
-  },
-  entryMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-    flexWrap: 'wrap',
-  },
-  entryTitle: {
-    fontSize: 24,
-    lineHeight: 32,
-    fontWeight: 800,
-  },
-  summaryList: {
-    gap: Spacing.two,
-  },
-  summaryRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: Spacing.two,
-  },
-  summaryBullet: {
-    width: 6,
-    height: 6,
-    borderRadius: 999,
-    marginTop: 11,
-  },
-  summaryText: {
-    flex: 1,
+  emptyText: {
     fontSize: 16,
     lineHeight: 25,
     fontWeight: 600,
   },
-  previewText: {
-    fontSize: 16,
-    lineHeight: 25,
-    fontWeight: 500,
-  },
-  bodyToggle: {
-    minHeight: 44,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.three,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  paperList: {
     gap: Spacing.three,
   },
-  pressedToggle: {
-    opacity: 0.7,
+  paperStack: {
+    position: 'relative',
+    paddingRight: 9,
+    paddingBottom: 10,
   },
-  transcriptText: {
-    fontSize: 17,
-    lineHeight: 28,
-    fontWeight: 500,
+  paperBackLayer: {
+    position: 'absolute',
+    left: 9,
+    top: 10,
+    right: 0,
+    bottom: 0,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 23,
+    borderCurve: 'continuous',
+  },
+  paperMiddleLayer: {
+    position: 'absolute',
+    left: 5,
+    top: 5,
+    right: 4,
+    bottom: 5,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 23,
+    borderCurve: 'continuous',
+  },
+  entryPaper: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 23,
+    borderCurve: 'continuous',
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  bodyText: {
+    fontSize: 18,
+    lineHeight: 31,
+    fontWeight: 600,
   },
 });

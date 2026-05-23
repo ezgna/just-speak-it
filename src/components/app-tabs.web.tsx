@@ -31,9 +31,6 @@ export default function AppTabs() {
           <TabTrigger name="flashcards" href="/flashcards" asChild>
             <TabButton>復習</TabButton>
           </TabTrigger>
-          <TabTrigger name="flashcards-lab" href="/flashcards-lab" asChild>
-            <TabButton>実験</TabButton>
-          </TabTrigger>
         </CustomTabList>
       </TabList>
     </Tabs>
