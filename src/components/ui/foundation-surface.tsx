@@ -1,5 +1,13 @@
 import * as Haptics from 'expo-haptics';
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   Animated,
   Easing,
@@ -15,6 +23,7 @@ import { useReducedMotion } from 'react-native-reanimated';
 
 type SurfaceHaptic = 'none' | 'selection';
 export type FoundationSurfaceDirection = 'down' | 'diagonal';
+type FoundationSurfaceRadiusMode = 'same' | 'concentric';
 type FoundationEasing = (value: number) => number;
 
 export const FOUNDATION_SCROLL_PRESS_DELAY_MS = 200;
@@ -46,6 +55,8 @@ export type FoundationSurfaceProps = {
   style?: StyleProp<ViewStyle>;
   containerStyle?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  pressed?: boolean;
+  holdPressOut?: boolean;
   accessibilityRole?: PressableProps['accessibilityRole'];
   accessibilityLabel?: string;
   accessibilityState?: PressableProps['accessibilityState'];
@@ -57,6 +68,13 @@ export type FoundationSurfaceProps = {
   foundationDistanceScale?: number;
   foundationDirection?: FoundationSurfaceDirection;
   foundationColor?: string;
+  foundationBorderColor?: string;
+  foundationBorderWidth?: number;
+  foundationOffsetX?: number;
+  foundationOffsetY?: number;
+  foundationRadiusMode?: FoundationSurfaceRadiusMode;
+  pressedOffsetX?: number;
+  pressedOffsetY?: number;
   pressTravelRatio?: number;
   pressDiagonalRatio?: number;
   pressInDuration?: number;
@@ -104,6 +122,8 @@ export function FoundationSurface({
   style,
   containerStyle,
   disabled = false,
+  pressed = false,
+  holdPressOut = false,
   accessibilityRole,
   accessibilityLabel,
   accessibilityState,
@@ -115,6 +135,13 @@ export function FoundationSurface({
   foundationDistanceScale = DefaultFoundationDistanceScale,
   foundationDirection = 'down',
   foundationColor = '#111111',
+  foundationBorderColor,
+  foundationBorderWidth = 0,
+  foundationOffsetX,
+  foundationOffsetY,
+  foundationRadiusMode = 'same',
+  pressedOffsetX,
+  pressedOffsetY,
   pressTravelRatio = DefaultTravelRatio,
   pressDiagonalRatio = DefaultDiagonalRatio,
   pressInDuration = DefaultPressInDuration,
@@ -127,6 +154,7 @@ export function FoundationSurface({
   const reduceMotion = useReducedMotion();
   const [translateX] = useState(() => new Animated.Value(0));
   const [translateY] = useState(() => new Animated.Value(0));
+  const [pressProgress] = useState(() => new Animated.Value(0));
   const flattenedStyle = useMemo(() => StyleSheet.flatten(style) ?? {}, [style]);
   const borderRadius =
     typeof flattenedStyle.borderRadius === 'number' ? flattenedStyle.borderRadius : 24;
@@ -134,20 +162,50 @@ export function FoundationSurface({
     !disabled && (typeof onPress === 'function' || typeof onLongPress === 'function');
   const resolvedPressDelay = pressDelay ?? contextPressDelay;
   const foundationDepthPx = Math.max(Math.round(foundationDepth * foundationDistanceScale), 2);
-  const foundationOffset = getFoundationOffset({
+  const measuredFoundationOffset = getFoundationOffset({
     depth: foundationDepthPx,
     direction: foundationDirection,
   });
+  const foundationOffset = {
+    x: foundationOffsetX ?? measuredFoundationOffset.x,
+    y: foundationOffsetY ?? measuredFoundationOffset.y,
+  };
   const pressDepth = Math.max(Math.round(foundationDepth * pressTravelRatio), 2);
-  const maxPressX = Math.max(foundationOffset.x - 1, 0);
-  const maxPressY = Math.max(foundationOffset.y - 1, 0);
+  const maxPressX = Math.max(
+    pressedOffsetX === undefined ? foundationOffset.x - 1 : foundationOffset.x,
+    0
+  );
+  const maxPressY = Math.max(
+    pressedOffsetY === undefined ? foundationOffset.y - 1 : foundationOffset.y,
+    0
+  );
   const pressX = Math.min(
-    foundationDirection === 'diagonal'
-      ? Math.max(Math.round(pressDepth * pressDiagonalRatio), 2)
-      : 0,
+    pressedOffsetX ??
+      (foundationDirection === 'diagonal'
+        ? Math.max(Math.round(pressDepth * pressDiagonalRatio), 2)
+        : 0),
     maxPressX
   );
-  const pressY = Math.min(pressDepth, maxPressY);
+  const pressY = Math.min(pressedOffsetY ?? pressDepth, maxPressY);
+  const foundationRestBorderRadius =
+    foundationRadiusMode === 'concentric'
+      ? borderRadius + Math.max(foundationOffset.x, foundationOffset.y)
+      : borderRadius;
+  const foundationPressedBorderRadius =
+    foundationRadiusMode === 'concentric'
+      ? borderRadius + Math.max(foundationOffset.x - pressX, foundationOffset.y - pressY, 0)
+      : borderRadius;
+  const foundationBorderRadius = useMemo(() => {
+    if (foundationRestBorderRadius === foundationPressedBorderRadius) {
+      return foundationRestBorderRadius;
+    }
+
+    return pressProgress.interpolate({
+      inputRange: [0, 1],
+      outputRange: [foundationRestBorderRadius, foundationPressedBorderRadius],
+      extrapolate: 'clamp',
+    });
+  }, [foundationPressedBorderRadius, foundationRestBorderRadius, pressProgress]);
 
   const animatedStyle = useMemo(
     () => ({
@@ -157,7 +215,13 @@ export function FoundationSurface({
   );
 
   const animateTo = useCallback(
-    (nextX: number, nextY: number, duration: number, easing: FoundationEasing) => {
+    (
+      nextX: number,
+      nextY: number,
+      nextProgress: number,
+      duration: number,
+      easing: FoundationEasing
+    ) => {
       const resolvedDuration = reduceMotion ? 0 : duration;
 
       Animated.parallel([
@@ -173,10 +237,35 @@ export function FoundationSurface({
           easing,
           useNativeDriver: true,
         }),
+        Animated.timing(pressProgress, {
+          toValue: nextProgress,
+          duration: resolvedDuration,
+          easing,
+          useNativeDriver: false,
+        }),
       ]).start();
     },
-    [reduceMotion, translateX, translateY]
+    [pressProgress, reduceMotion, translateX, translateY]
   );
+
+  useEffect(() => {
+    if (pressed) {
+      animateTo(pressX, pressY, 1, pressInDuration, pressInEasing);
+      return;
+    }
+
+    animateTo(0, 0, 0, pressOutDuration, pressOutEasing);
+  }, [
+    animateTo,
+    disabled,
+    pressInDuration,
+    pressInEasing,
+    pressed,
+    pressOutDuration,
+    pressOutEasing,
+    pressX,
+    pressY,
+  ]);
 
   const triggerHaptic = useCallback(() => {
     if (!isInteractive || haptic !== 'selection' || process.env.EXPO_OS !== 'ios') {
@@ -197,7 +286,7 @@ export function FoundationSurface({
         },
         containerStyle,
       ]}>
-      <View
+      <Animated.View
         pointerEvents="none"
         style={{
           position: 'absolute',
@@ -205,7 +294,10 @@ export function FoundationSurface({
           top: foundationOffset.y,
           right: 0,
           bottom: 0,
-          borderRadius,
+          borderRadius: foundationBorderRadius,
+          borderCurve: 'continuous',
+          borderWidth: foundationBorderWidth,
+          borderColor: foundationBorderColor,
           backgroundColor: foundationColor,
         }}
       />
@@ -222,10 +314,15 @@ export function FoundationSurface({
             onLongPress={onLongPress}
             onPressIn={() => {
               triggerHaptic();
-              animateTo(pressX, pressY, pressInDuration, pressInEasing);
+              animateTo(pressX, pressY, 1, pressInDuration, pressInEasing);
             }}
             onPressOut={() => {
-              animateTo(0, 0, pressOutDuration, pressOutEasing);
+              if (pressed || holdPressOut) {
+                animateTo(pressX, pressY, 1, pressInDuration, pressInEasing);
+                return;
+              }
+
+              animateTo(0, 0, 0, pressOutDuration, pressOutEasing);
             }}
             unstable_pressDelay={resolvedPressDelay}
             android_ripple={androidRippleColor ? { color: androidRippleColor } : undefined}

@@ -1,17 +1,18 @@
 {
   "expo": {
-    "name": "Daily to English",
-    "slug": "daily-to-english",
+    "name": "Just Speak It",
+    "slug": "just-speak-it",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "dailytoenglish",
+    "scheme": "justspeakit",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon",
-      "bundleIdentifier": "com.ezgna.daily-to-english"
+      "bundleIdentifier": "com.ezgna.justspeakit"
     },
     "android": {
+      "package": "com.ezgna.justspeakit",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -51,7 +52,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "日本語で話した内容を文字起こしして英語練習に変えるため、マイクを使用します。",
+          "microphonePermission": "Just Speak Itで話した内容を文字起こしして英語練習に変えるため、マイクを使用します。",
           "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false
         }

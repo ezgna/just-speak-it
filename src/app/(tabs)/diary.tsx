@@ -1,15 +1,34 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
+import { FoundationSurface } from '@/components/ui/foundation-surface';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { listDiaryEntries, type DiaryEntry } from '@/lib/backend/practice';
 import { subscribeToPracticeRefresh } from '@/lib/practice-refresh';
 
 type LoadMode = 'initial' | 'refresh' | 'sync';
-type Palette = ReturnType<typeof useDailyPalette>;
+const WebTopTabInset = process.env.EXPO_OS === 'web' ? 76 : 0;
+
+const DiaryColors = {
+  accent: '#D85642',
+  bodyText: '#111111',
+  error: '#E8664F',
+  paper: '#FFF0EC',
+  foundation: '#FF7661',
+} as const;
+
+const CoralFoundationOffset = 7;
 
 export default function DiaryScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -129,7 +148,7 @@ export default function DiaryScreen() {
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: safeAreaInsets.top + Spacing.two,
+          paddingTop: safeAreaInsets.top + WebTopTabInset + Spacing.two,
           paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
@@ -140,46 +159,42 @@ export default function DiaryScreen() {
       }>
       <View style={styles.container}>
         {isInitialLoading && entries.length === 0 && (
-          <View style={styles.loadingState}>
-            <ActivityIndicator color={palette.primary} />
-          </View>
+          <DiaryStatePaper>
+            <ActivityIndicator color={DiaryColors.accent} />
+            <ThemedText style={styles.stateText} selectable>
+              日記を読み込んでいます。
+            </ThemedText>
+          </DiaryStatePaper>
         )}
 
         {!isInitialLoading && entries.length === 0 && !errorMessage && (
-          <View style={styles.emptyState}>
-            <ThemedText style={[styles.emptyText, { color: palette.textSecondary }]} selectable>
+          <DiaryStatePaper>
+            <ThemedText style={styles.stateText} selectable>
               まだ積まれた日記はありません。
             </ThemedText>
-          </View>
+          </DiaryStatePaper>
         )}
 
         {errorMessage && entries.length === 0 && (
-          <View style={styles.emptyState}>
-            <ThemedText style={[styles.emptyText, { color: palette.coral }]} selectable>
+          <DiaryStatePaper>
+            <ThemedText style={[styles.stateText, styles.errorText]} selectable>
               {errorMessage}
             </ThemedText>
-          </View>
+          </DiaryStatePaper>
         )}
 
         {errorMessage && entries.length > 0 && (
-          <View
-            style={[
-              styles.errorBanner,
-              {
-                backgroundColor: palette.card,
-                borderColor: palette.border,
-              },
-            ]}>
-            <ThemedText type="smallBold" style={{ color: palette.coral }} selectable>
+          <View style={styles.errorBanner}>
+            <ThemedText type="smallBold" style={styles.errorText} selectable>
               {errorMessage}
             </ThemedText>
           </View>
         )}
 
         {entries.length > 0 && (
-          <View style={styles.paperList}>
-            {entries.map((entry, index) => (
-              <DiaryPaper key={entry.id} entry={entry} index={index} palette={palette} />
+          <View style={styles.diaryPaperList}>
+            {entries.map((entry) => (
+              <DiaryPaper key={entry.id} entry={entry} />
             ))}
           </View>
         )}
@@ -188,56 +203,49 @@ export default function DiaryScreen() {
   );
 }
 
-function DiaryPaper({
-  entry,
-  index,
-  palette,
-}: {
-  entry: DiaryEntry;
-  index: number;
-  palette: Palette;
-}) {
-  const paperColor = getPaperColor(index, palette);
-
+function DiaryPaper({ entry }: { entry: DiaryEntry }) {
   return (
-    <View style={styles.paperStack}>
-      <View
-        pointerEvents="none"
-        style={[
-          styles.paperBackLayer,
-          {
-            backgroundColor: palette.cardAlt,
-            borderColor: palette.border,
-          },
-        ]}
-      />
-      <View
-        pointerEvents="none"
-        style={[
-          styles.paperMiddleLayer,
-          {
-            backgroundColor: palette.backgroundElement,
-            borderColor: palette.border,
-          },
-        ]}
-      />
-      <View
-        style={[
-          styles.entryPaper,
-          {
-            backgroundColor: paperColor,
-            borderColor: palette.border,
-            boxShadow: palette.shadow,
-          },
-        ]}>
-        <ThemedText type="code" style={{ color: palette.textSecondary }} selectable>
-          {formatDate(entry.createdAt)}
-        </ThemedText>
-        <ThemedText style={[styles.bodyText, { color: palette.text }]} selectable>
-          {entry.bodyText}
-        </ThemedText>
-      </View>
-    </View>
+    <DiaryPaperSurface>
+      <ThemedText style={styles.diaryPaperDate} selectable>
+        {formatDate(entry.createdAt)}
+      </ThemedText>
+      <ThemedText style={styles.diaryPaperBody} selectable>
+        {entry.bodyText}
+      </ThemedText>
+    </DiaryPaperSurface>
+  );
+}
+
+function DiaryStatePaper({ children }: { children: React.ReactNode }) {
+  return <DiaryPaperSurface style={styles.statePaper}>{children}</DiaryPaperSurface>;
+}
+
+function DiaryPaperSurface({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  return (
+    <FoundationSurface
+      foundationDepth={12}
+      foundationDistanceScale={0.72}
+      foundationDirection="diagonal"
+      foundationColor={DiaryColors.foundation}
+      foundationBorderColor={DiaryColors.bodyText}
+      foundationBorderWidth={4}
+      foundationOffsetX={CoralFoundationOffset}
+      foundationOffsetY={CoralFoundationOffset}
+      foundationRadiusMode="concentric"
+      pressTravelRatio={0.36}
+      pressDiagonalRatio={1}
+      pressInDuration={142}
+      pressOutDuration={270}
+      containerStyle={styles.diaryPaperSurface}
+      style={[styles.diaryPaper, style]}>
+      {children}
+    </FoundationSurface>
   );
 }
 
@@ -246,11 +254,6 @@ function formatDate(value: string) {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value));
-}
-
-function getPaperColor(index: number, palette: Palette) {
-  const colors = [palette.card, palette.cardAlt, '#FFF8EA'];
-  return colors[index % colors.length];
 }
 
 const styles = StyleSheet.create({
@@ -266,65 +269,53 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     gap: Spacing.three,
   },
-  loadingState: {
-    minHeight: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: Spacing.three,
+  diaryPaperList: {
+    gap: Spacing.three,
   },
-  errorBanner: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 16,
+  diaryPaperSurface: {
+    alignSelf: 'stretch',
+  },
+  diaryPaper: {
+    borderRadius: 20,
     borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: DiaryColors.bodyText,
+    backgroundColor: DiaryColors.paper,
+    gap: Spacing.two,
     padding: Spacing.three,
   },
-  emptyState: {
-    minHeight: 360,
+  diaryPaperDate: {
+    color: DiaryColors.accent,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: 900,
+  },
+  diaryPaperBody: {
+    color: DiaryColors.bodyText,
+    fontSize: 17,
+    lineHeight: 28,
+    fontWeight: 800,
+  },
+  statePaper: {
+    minHeight: 148,
+    alignItems: 'flex-start',
     justifyContent: 'center',
   },
-  emptyText: {
-    fontSize: 16,
-    lineHeight: 25,
-    fontWeight: 600,
+  stateText: {
+    color: DiaryColors.bodyText,
+    fontSize: 17,
+    lineHeight: 28,
+    fontWeight: 800,
   },
-  paperList: {
-    gap: Spacing.three,
-  },
-  paperStack: {
-    position: 'relative',
-    paddingRight: 9,
-    paddingBottom: 10,
-  },
-  paperBackLayer: {
-    position: 'absolute',
-    left: 9,
-    top: 10,
-    right: 0,
-    bottom: 0,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 23,
+  errorBanner: {
+    borderRadius: 20,
     borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: DiaryColors.bodyText,
+    backgroundColor: DiaryColors.paper,
+    padding: Spacing.three,
   },
-  paperMiddleLayer: {
-    position: 'absolute',
-    left: 5,
-    top: 5,
-    right: 4,
-    bottom: 5,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 23,
-    borderCurve: 'continuous',
-  },
-  entryPaper: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 23,
-    borderCurve: 'continuous',
-    padding: Spacing.four,
-    gap: Spacing.three,
-  },
-  bodyText: {
-    fontSize: 18,
-    lineHeight: 31,
-    fontWeight: 600,
+  errorText: {
+    color: DiaryColors.error,
   },
 });

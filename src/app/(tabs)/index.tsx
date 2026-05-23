@@ -27,6 +27,8 @@ export default function HomeScreen() {
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(audioRecorder);
   const [isRecordingBusy, setIsRecordingBusy] = useState(false);
+  const [recordingIntentActive, setRecordingIntentActive] = useState(false);
+  const [writingPressHeld, setWritingPressHeld] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isGeneratingCards, setIsGeneratingCards] = useState(false);
   const [rawTranscriptText, setRawTranscriptText] = useState<string | null>(null);
@@ -36,9 +38,15 @@ export default function HomeScreen() {
   const [cards, setCards] = useState<TranslationCard[]>([]);
   const generationInFlightRef = useRef(false);
 
+  const isRecordingButtonActive =
+    recorderState.isRecording || isRecordingBusy || recordingIntentActive;
   const isWorking = isRecordingBusy || isTranscribing || isGeneratingCards;
+  const isRecordingButtonPressed =
+    writingPressHeld || isTranscribing || isGeneratingCards;
+  const isRecordingButtonDisabled =
+    isWorking || (recordingIntentActive && !recorderState.isRecording);
   const hasTranscriptPanel = Boolean(
-    recorderState.isRecording ||
+    isRecordingButtonActive ||
       isTranscribing ||
       cleanedTranscriptText !== null ||
       rawTranscriptText ||
@@ -48,6 +56,7 @@ export default function HomeScreen() {
 
   async function startRecording() {
     setIsRecordingBusy(true);
+    setRecordingIntentActive(true);
     setRawTranscriptText(null);
     setCleanedTranscriptText(null);
     setTranscriptionError(null);
@@ -57,6 +66,7 @@ export default function HomeScreen() {
     try {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!permission.granted) {
+        setRecordingIntentActive(false);
         Alert.alert('録音できません', 'マイク権限がないため録音できません。');
         return;
       }
@@ -68,6 +78,7 @@ export default function HomeScreen() {
       await audioRecorder.prepareToRecordAsync();
       audioRecorder.record();
     } catch (error) {
+      setRecordingIntentActive(false);
       Alert.alert(
         '録音できません',
         error instanceof Error ? error.message : '録音の開始に失敗しました。'
@@ -78,6 +89,7 @@ export default function HomeScreen() {
   }
 
   async function stopRecording() {
+    setRecordingIntentActive(false);
     setIsRecordingBusy(true);
     setTranscriptionError(null);
 
@@ -100,6 +112,11 @@ export default function HomeScreen() {
         error instanceof Error ? error.message : '録音の停止に失敗しました。'
       );
     } finally {
+      if (recordingUri) {
+        setIsTranscribing(true);
+      } else {
+        setWritingPressHeld(false);
+      }
       setIsRecordingBusy(false);
     }
 
@@ -121,6 +138,7 @@ export default function HomeScreen() {
       );
     } finally {
       setIsTranscribing(false);
+      setWritingPressHeld(false);
     }
   }
 
@@ -157,6 +175,7 @@ export default function HomeScreen() {
 
   async function handleRecordingPress() {
     if (recorderState.isRecording) {
+      setWritingPressHeld(true);
       await stopRecording();
       return;
     }
@@ -182,15 +201,17 @@ export default function HomeScreen() {
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
-      <View style={styles.labEntry}>
-        <GlideButton
-          label="実験室"
-          caption="design lab"
-          icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-          tone="mint"
-          onPress={() => router.push('/design-lab')}
-        />
-      </View>
+      {__DEV__ ? (
+        <View style={styles.labEntry}>
+          <GlideButton
+            label="実験室"
+            caption="design lab"
+            icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+            tone="mint"
+            onPress={() => router.push('/design-lab')}
+          />
+        </View>
+      ) : null}
 
       <ScrollView
         style={styles.scrollArea}
@@ -367,29 +388,40 @@ export default function HomeScreen() {
       </ScrollView>
 
       <View style={styles.buttonDock}>
-        <ActionButton
+        <GlideButton
           label={
-            isTranscribing
-              ? '文字起こし中'
-              : isGeneratingCards
-                ? '作成中'
-                : isRecordingBusy
-                  ? '準備中'
-                  : recorderState.isRecording
-                    ? '録音を止める'
-                    : cleanedTranscriptText !== null
-                      ? 'もう一度話す'
-                      : '音声で話す'
+            isTranscribing || isGeneratingCards
+              ? 'Writing it up'
+              : isRecordingButtonActive
+                ? 'Done'
+                : cleanedTranscriptText !== null
+                  ? 'Try again'
+                  : 'Speak It'
           }
           icon={
-            recorderState.isRecording
+            isRecordingButtonActive
               ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
-              : { ios: 'mic.fill', android: 'mic', web: 'mic' }
+              : isTranscribing || isGeneratingCards
+                ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
+                : cleanedTranscriptText !== null
+                  ? { ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' }
+                  : { ios: 'mic.fill', android: 'mic', web: 'mic' }
           }
-          variant={recorderState.isRecording ? 'secondary' : 'primary'}
-          disabled={isWorking}
+          tone={
+            isTranscribing || isGeneratingCards
+              ? 'aqua'
+              : isRecordingButtonActive
+                ? 'orange'
+                : cleanedTranscriptText !== null
+                  ? 'violet'
+                  : 'mint'
+          }
+          size="large"
+          disabled={isRecordingButtonDisabled}
+          pressed={isRecordingButtonPressed}
+          holdPressOut={recorderState.isRecording}
+          containerStyle={styles.recordButtonContainer}
           onPress={handleRecordingPress}
-          style={styles.recordButton}
         />
       </View>
     </View>
@@ -516,7 +548,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
   },
-  recordButton: {
-    minHeight: 56,
+  recordButtonContainer: {
+    opacity: 1,
   },
 });

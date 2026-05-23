@@ -1,4 +1,4 @@
-import { SymbolView } from 'expo-symbols';
+import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { type ReactNode } from 'react';
 import {
   ScrollView,
@@ -12,7 +12,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
-import { GlideButton } from '@/components/ui/glide-button';
+import {
+  GlideButton,
+  type GlideButtonSize,
+  type GlideButtonTone,
+} from '@/components/ui/glide-button';
 import {
   FOUNDATION_SCROLL_PRESS_DELAY_MS,
   FoundationSurface,
@@ -22,32 +26,6 @@ import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 
 const AdoptedFoundationDistance = 0.56;
 const FoundationBorderColor = '#111111';
-
-function LabSectionHeader({
-  eyebrow,
-  title,
-  description,
-}: {
-  eyebrow: string;
-  title: string;
-  description: string;
-}) {
-  return (
-    <View style={styles.sectionHeader}>
-      <View style={styles.sectionEyebrow}>
-        <ThemedText type="code" style={styles.sectionEyebrowText}>
-          {eyebrow}
-        </ThemedText>
-      </View>
-      <ThemedText type="subtitle" style={styles.labTitle} selectable>
-        {title}
-      </ThemedText>
-      <ThemedText style={styles.labDescription} selectable>
-        {description}
-      </ThemedText>
-    </View>
-  );
-}
 
 function ButtonSourceShelf() {
   return (
@@ -64,24 +42,30 @@ function ButtonSourceShelf() {
       <View style={styles.buttonSourceGrid}>
         <ButtonSourceSample label="large">
           <GlideButton
-            label="つづける"
+            label="Speak It"
             tone="mint"
-            caption="アクセント方向"
-            icon={{ ios: 'arrow.forward', android: 'arrow_forward', web: 'arrow_forward' }}
+            caption="Core"
+            icon={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
           />
         </ButtonSourceSample>
 
         <ButtonSourceSample label="medium">
           <GlideButton
-            label="言えた"
-            tone="green"
+            label="Done"
+            tone="orange"
             size="medium"
-            icon={{ ios: 'checkmark', android: 'check', web: 'check' }}
+            icon={{ ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }}
           />
         </ButtonSourceSample>
 
         <ButtonSourceSample label="compact">
-          <GlideButton label="スキップ" tone="cream" size="compact" fullWidth={false} />
+          <GlideButton
+            label="Try again"
+            tone="violet"
+            size="compact"
+            fullWidth={false}
+            icon={{ ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' }}
+          />
         </ButtonSourceSample>
       </View>
     </View>
@@ -97,72 +81,972 @@ function ButtonSourceSample({ children, label }: { children: ReactNode; label: s
   );
 }
 
-type DiaryConceptEntry = {
+type ColorfulGlideVariant = {
+  caption: string;
   id: string;
-  date: string;
-  body: string;
-  color: string;
+  label: string;
+  size?: GlideButtonSize;
+  tone: GlideButtonTone;
+  icon: SymbolViewProps['name'];
 };
 
-const DiaryConceptEntries: DiaryConceptEntry[] = [
+const ColorfulGlideVariants: ColorfulGlideVariant[] = [
   {
-    id: 'bakery',
-    date: '今日 18:42',
-    body: '今日は帰り道に、ずっと気になっていたパン屋に寄りました。店内は思っていたより静かで、夕方の光が棚の奥まで入っていて、少しだけ気持ちが落ち着きました。',
-    color: '#FFF9EC',
+    id: 'voice',
+    label: 'Speak It',
+    caption: 'はじめる',
+    tone: 'orange',
+    icon: { ios: 'mic.fill', android: 'mic', web: 'mic' },
   },
   {
-    id: 'meeting',
-    date: '昨日 09:18',
-    body: '朝の会議で話した内容を、あとで英語でも説明できるようにしたいと思いました。言いたいこと自体はあるのに、英語にしようとすると急に細かい部分が抜けてしまいます。',
-    color: '#FFFFFF',
+    id: 'done',
+    label: 'Done',
+    caption: '録音中',
+    tone: 'coral',
+    icon: { ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' },
   },
   {
-    id: 'shopping',
-    date: '5月20日',
-    body: '今日は少し疲れていたけれど、帰る前に買い物だけ済ませました。早く帰りたい気持ちもあったけれど、明日の朝に慌てずに済むと思うと、やっておいてよかったです。',
-    color: '#FFF8EA',
+    id: 'writing',
+    label: 'Writing it up',
+    caption: '処理中',
+    tone: 'sky',
+    icon: { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' },
+  },
+  {
+    id: 'retry',
+    label: 'Try again',
+    caption: '再入力',
+    tone: 'violet',
+    icon: { ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' },
+  },
+  {
+    id: 'diary',
+    label: '日記を見る',
+    caption: '読み返す',
+    tone: 'pink',
+    icon: { ios: 'text.book.closed.fill', android: 'menu_book', web: 'menu_book' },
+  },
+  {
+    id: 'cards',
+    label: '英語カード',
+    caption: 'つくる',
+    tone: 'lemon',
+    icon: { ios: 'rectangle.stack.fill', android: 'view_carousel', web: 'view_carousel' },
+  },
+  {
+    id: 'review',
+    label: '復習する',
+    caption: 'あとで言える',
+    tone: 'grape',
+    icon: { ios: 'bolt.fill', android: 'bolt', web: 'bolt' },
+  },
+  {
+    id: 'save',
+    label: '保存',
+    caption: 'ログに残す',
+    tone: 'aqua',
+    size: 'medium',
+    icon: { ios: 'tray.and.arrow.down.fill', android: 'save', web: 'save' },
   },
 ];
 
-function DiaryTabConcept() {
+const ColorfulGlideCompactVariants: ColorfulGlideVariant[] = [
+  {
+    id: 'today',
+    label: '今日',
+    caption: '',
+    tone: 'orange',
+    size: 'compact',
+    icon: { ios: 'sun.max.fill', android: 'light_mode', web: 'light_mode' },
+  },
+  {
+    id: 'note',
+    label: '日記',
+    caption: '',
+    tone: 'pink',
+    size: 'compact',
+    icon: { ios: 'book.fill', android: 'book', web: 'book' },
+  },
+  {
+    id: 'english',
+    label: '英語',
+    caption: '',
+    tone: 'sky',
+    size: 'compact',
+    icon: { ios: 'textformat', android: 'translate', web: 'translate' },
+  },
+  {
+    id: 'reviewCompact',
+    label: '復習',
+    caption: '',
+    tone: 'grape',
+    size: 'compact',
+    icon: { ios: 'bolt.fill', android: 'bolt', web: 'bolt' },
+  },
+];
+
+type ColorSystemRole = {
+  color: string;
+  id: string;
+  label: string;
+  note: string;
+  role: string;
+};
+
+const CoreColorSystemRoles: ColorSystemRole[] = [
+  {
+    id: 'primary',
+    role: 'Core',
+    label: 'Speak It',
+    color: '#2FDD6C',
+    note: '入口 / 主役',
+  },
+  {
+    id: 'done',
+    role: 'Warm',
+    label: 'Done',
+    color: '#FF9F45',
+    note: '完了 / 決定',
+  },
+  {
+    id: 'process',
+    role: 'Cool',
+    label: 'Writing',
+    color: '#65D7F2',
+    note: '処理 / 変換',
+  },
+  {
+    id: 'retry',
+    role: 'Shift',
+    label: 'Try again',
+    color: '#9B7CFF',
+    note: '戻る / 再試行',
+  },
+  {
+    id: 'alert',
+    role: 'Accent',
+    label: 'Alert',
+    color: '#FF7661',
+    note: '注意 / 強調',
+  },
+  {
+    id: 'fun',
+    role: 'Spark',
+    label: 'Play',
+    color: '#F4E75E',
+    note: '楽しさ / 報酬',
+  },
+  {
+    id: 'paper',
+    role: 'Paper',
+    label: 'Surface',
+    color: '#FFF6E7',
+    note: '背景 / 読み物',
+  },
+] as const;
+
+function ColorSystemShelf() {
   return (
-    <View style={styles.diaryTabMockup}>
-      <View style={styles.diaryHero}>
-        <View style={styles.diaryHeroCopy}>
-          <View style={styles.diaryHeroKicker}>
-            <ThemedText style={styles.diaryHeroKickerText}>日記タブ案</ThemedText>
-          </View>
-          <ThemedText style={styles.diaryHeroTitle} selectable>
-            紙片スタック
+    <View style={styles.colorSystemShelf}>
+      <View style={styles.colorSystemHeader}>
+        <View style={styles.colorSystemCopy}>
+          <ThemedText style={styles.colorSystemTitle}>Color System</ThemedText>
+          <ThemedText style={styles.colorSystemDescription}>
+            緑をCoreにして、完了・処理・再試行を色相の違う役割色として固定する案。
           </ThemedText>
-          <ThemedText style={styles.diaryHeroText} selectable>
-            日時と本文だけを残して、話したことがそのまま積み上がる読み物。
-          </ThemedText>
+        </View>
+        <View style={styles.colorSystemAxisBadge}>
+          <ThemedText style={styles.colorSystemAxisText}>Hue Axis</ThemedText>
         </View>
       </View>
 
-      <View style={styles.diaryPaperList}>
-        {DiaryConceptEntries.map((entry) => (
-          <DiaryConceptPaper key={entry.id} entry={entry} />
+      <View style={styles.colorSystemSwatchGrid}>
+        {CoreColorSystemRoles.map((role) => (
+          <View key={role.id} style={styles.colorSystemSwatchCard}>
+            <View style={[styles.colorSystemSwatch, { backgroundColor: role.color }]} />
+            <View style={styles.colorSystemSwatchText}>
+              <ThemedText style={styles.colorSystemRole}>{role.role}</ThemedText>
+              <ThemedText style={styles.colorSystemLabel}>{role.label}</ThemedText>
+              <ThemedText style={styles.colorSystemNote}>{role.note}</ThemedText>
+              <ThemedText style={styles.colorSystemHex}>{role.color}</ThemedText>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.colorSystemFlow}>
+        <GlideButton
+          label="Speak It"
+          caption="Core"
+          tone="mint"
+          icon={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
+        />
+        <GlideButton
+          label="Done"
+          caption="Warm"
+          tone="orange"
+          icon={{ ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }}
+        />
+        <GlideButton
+          label="Writing it up"
+          caption="Cool"
+          tone="aqua"
+          icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+        />
+        <GlideButton
+          label="Try again"
+          caption="Shift"
+          tone="violet"
+          icon={{ ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' }}
+        />
+      </View>
+    </View>
+  );
+}
+
+function ColorfulGlideShelf() {
+  return (
+    <View style={styles.colorfulGlideShelf}>
+      <View style={styles.colorfulGlideHeader}>
+        <View style={styles.colorfulGlideCopy}>
+          <ThemedText style={styles.colorfulGlideTitle}>Colorful Glide Set</ThemedText>
+          <ThemedText style={styles.colorfulGlideDescription}>
+            緑だけに寄せず、入口・完了・処理・復習を色で分ける案。
+          </ThemedText>
+        </View>
+        <View style={styles.colorfulGlideBadge}>
+          <ThemedText style={styles.colorfulGlideBadgeText}>Playful</ThemedText>
+        </View>
+      </View>
+
+      <View style={styles.colorfulGlideGrid}>
+        {ColorfulGlideVariants.map((variant) => (
+          <View key={variant.id} style={styles.colorfulGlideCell}>
+            <ThemedText style={styles.colorfulGlideLabel}>{variant.tone}</ThemedText>
+            <GlideButton
+              label={variant.label}
+              caption={variant.caption}
+              icon={variant.icon}
+              tone={variant.tone}
+              size={variant.size}
+            />
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.colorfulCompactRow}>
+        {ColorfulGlideCompactVariants.map((variant) => (
+          <GlideButton
+            key={variant.id}
+            label={variant.label}
+            icon={variant.icon}
+            iconSide="left"
+            tone={variant.tone}
+            size="compact"
+            fullWidth={false}
+          />
         ))}
       </View>
     </View>
   );
 }
 
-function DiaryConceptPaper({ entry }: { entry: DiaryConceptEntry }) {
+type DiaryConceptEntry = {
+  id: string;
+  body: string;
+};
+
+type DiaryButtonVariant =
+  | 'spine'
+  | 'tray'
+  | 'nMint'
+  | 'nAmber'
+  | 'nBlue'
+  | 'nCoral'
+  | 'nDiaryBlue'
+  | 'nIceBlue'
+  | 'nSkyBlue';
+
+type DiaryButtonVariantSample = { id: DiaryButtonVariant; label: string; entryIndex: number };
+
+const DiaryConceptEntries: DiaryConceptEntry[] = [
+  {
+    id: 'bakery',
+    body: '今日は帰り道に、ずっと気になっていたパン屋に寄りました。店内は思っていたより静かで、夕方の光が棚の奥まで入っていて、少しだけ気持ちが落ち着きました。',
+  },
+  {
+    id: 'meeting',
+    body: '朝の会議で話した内容を、あとで英語でも説明できるようにしたいと思いました。言いたいこと自体はあるのに、英語にしようとすると急に細かい部分が抜けてしまいます。',
+  },
+  {
+    id: 'shopping',
+    body: '今日は少し疲れていたけれど、帰る前に買い物だけ済ませました。早く帰りたい気持ちもあったけれど、明日の朝に慌てずに済むと思うと、やっておいてよかったです。',
+  },
+];
+
+const DiaryButtonVariants: DiaryButtonVariantSample[] = [
+  { id: 'spine', label: 'C', entryIndex: 2 },
+  { id: 'tray', label: 'K', entryIndex: 1 },
+];
+
+const DiaryCardSourceVariants: DiaryButtonVariantSample[] = [
+  { id: 'nMint', label: 'Mint', entryIndex: 0 },
+  { id: 'nAmber', label: 'Amber', entryIndex: 0 },
+  { id: 'nBlue', label: 'Cobalt', entryIndex: 0 },
+  { id: 'nCoral', label: 'Coral', entryIndex: 0 },
+  { id: 'nDiaryBlue', label: 'Seafoam', entryIndex: 0 },
+  { id: 'nIceBlue', label: 'Ice', entryIndex: 0 },
+  { id: 'nSkyBlue', label: 'Sky', entryIndex: 0 },
+];
+
+const PaperPressRestOffset = 7;
+const StaticPaperInset = 3;
+
+const StaticPaperPressVariants = [
+  {
+    id: 'coralTray',
+    label: 'Coral Tray',
+    trayColor: '#FF7661',
+    paperColor: '#FFF0EC',
+    trayBorderWidth: 4,
+    paperBorderWidth: 0,
+  },
+] as const;
+
+const DynamicStampVariants = [
+  {
+    id: 'tightSnapStamp',
+    label: 'Tight Snap',
+    offset: 5,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: 5,
+    pressOutDuration: 240,
+  },
+  {
+    id: 'tightShallowStamp',
+    label: 'Tight Shallow Dark',
+    offset: 4,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: 4,
+    pressOutDuration: 240,
+  },
+  {
+    id: 'tightShallowLightStamp',
+    label: 'Tight Shallow Light',
+    offset: 4,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#EEEEEE',
+    textColor: '#000613',
+    pressedOffset: 4,
+    pressOutDuration: 240,
+  },
+  {
+    id: 'matchedStamp',
+    label: 'Matched Mint Dark',
+    offset: PaperPressRestOffset,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedLightMintPairStamp',
+    label: 'Matched Mint Light',
+    offset: PaperPressRestOffset,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#EEEEEE',
+    textColor: '#000613',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedAmberStamp',
+    label: 'Matched Amber',
+    offset: PaperPressRestOffset,
+    foundationColor: '#FFE2A6',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedCoralStamp',
+    label: 'Matched Coral',
+    offset: PaperPressRestOffset,
+    foundationColor: '#FF7661',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedSeafoamStamp',
+    label: 'Matched Seafoam',
+    offset: PaperPressRestOffset,
+    foundationColor: '#9EDCCC',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedIceStamp',
+    label: 'Matched Ice',
+    offset: PaperPressRestOffset,
+    foundationColor: '#B7E3F0',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedSkyStamp',
+    label: 'Matched Sky',
+    offset: PaperPressRestOffset,
+    foundationColor: '#9FD0F8',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedCobaltStamp',
+    label: 'Matched Cobalt',
+    offset: PaperPressRestOffset,
+    foundationColor: '#276EF1',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedDarkWarmStamp',
+    label: 'Dark Warm',
+    offset: PaperPressRestOffset,
+    foundationColor: '#2A231F',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedLightInverseStamp',
+    label: 'Light Inverse',
+    offset: PaperPressRestOffset,
+    foundationColor: '#D2D2D2',
+    foundationBorderWidth: 0,
+    frontColor: '#EEEEEE',
+    textColor: '#000613',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedLightCreamStamp',
+    label: 'Light Cream',
+    offset: PaperPressRestOffset,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#FFF9EC',
+    textColor: '#111111',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedLightWarmStamp',
+    label: 'Light Warm',
+    offset: PaperPressRestOffset,
+    foundationColor: '#FFE2A6',
+    foundationBorderWidth: 0,
+    frontColor: '#FFF6E6',
+    textColor: '#111111',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedLightCoralStamp',
+    label: 'Light Coral',
+    offset: PaperPressRestOffset,
+    foundationColor: '#FF7661',
+    foundationBorderWidth: 0,
+    frontColor: '#FFF0EC',
+    textColor: '#111111',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedLightIceStamp',
+    label: 'Light Ice',
+    offset: PaperPressRestOffset,
+    foundationColor: '#B7E3F0',
+    foundationBorderWidth: 0,
+    frontColor: '#F0FAFD',
+    textColor: '#111111',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'matchedLightMintStamp',
+    label: 'Light Mint',
+    offset: PaperPressRestOffset,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#EAFBF0',
+    textColor: '#111111',
+    pressedOffset: undefined,
+    pressOutDuration: 270,
+  },
+  {
+    id: 'deepStamp',
+    label: 'Deep',
+    offset: 9,
+    foundationColor: '#2FDD6C',
+    foundationBorderWidth: 0,
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+    pressedOffset: undefined,
+    pressOutDuration: 290,
+  },
+] as const;
+
+const ChicAccentModes = {
+  dark: {
+    label: 'Dark',
+    frontColor: '#111111',
+    textColor: '#FFF9EC',
+  },
+  light: {
+    label: 'Light',
+    frontColor: '#EEEEEE',
+    textColor: '#000613',
+  },
+} as const;
+
+const ChicAccentVariants = [
+  {
+    id: 'chicSage',
+    label: 'Sage',
+    accentColor: '#74836F',
+  },
+  {
+    id: 'chicBrass',
+    label: 'Brass',
+    accentColor: '#B79A5B',
+  },
+  {
+    id: 'chicOxblood',
+    label: 'Oxblood',
+    accentColor: '#8B3E46',
+  },
+  {
+    id: 'chicSlate',
+    label: 'Slate',
+    accentColor: '#596D7E',
+  },
+  {
+    id: 'chicPlum',
+    label: 'Plum',
+    accentColor: '#72536B',
+  },
+  {
+    id: 'chicTaupe',
+    label: 'Taupe',
+    accentColor: '#958B7E',
+  },
+] as const;
+
+const noopPress = () => {};
+
+const NFoundationColors: Partial<Record<DiaryButtonVariant, string>> = {
+  nMint: '#2FDD6C',
+  nAmber: '#FFE2A6',
+  nBlue: '#276EF1',
+  nCoral: '#FF7661',
+  nDiaryBlue: '#9EDCCC',
+  nIceBlue: '#B7E3F0',
+  nSkyBlue: '#9FD0F8',
+};
+
+const NCardColors: Partial<Record<DiaryButtonVariant, string>> = {
+  nMint: '#EAFBF0',
+  nBlue: '#EAF2FF',
+  nCoral: '#FFF0EC',
+  nDiaryBlue: '#ECF9F5',
+  nIceBlue: '#F0FAFD',
+  nSkyBlue: '#EEF7FF',
+};
+
+const NMatchedFoundationOffset: Partial<Record<DiaryButtonVariant, number>> = {
+  nMint: PaperPressRestOffset,
+  nAmber: PaperPressRestOffset,
+  nBlue: PaperPressRestOffset,
+  nCoral: PaperPressRestOffset,
+  nDiaryBlue: PaperPressRestOffset,
+  nIceBlue: PaperPressRestOffset,
+  nSkyBlue: PaperPressRestOffset,
+};
+
+const NMatchedFoundationBorderWidth: Partial<Record<DiaryButtonVariant, number>> = {
+  nMint: 4,
+  nAmber: 4,
+  nBlue: 4,
+  nCoral: 4,
+  nDiaryBlue: 4,
+  nIceBlue: 4,
+  nSkyBlue: 4,
+};
+
+const NConcentricFoundationRadiusVariants: Partial<Record<DiaryButtonVariant, boolean>> = {
+  nMint: true,
+  nAmber: true,
+  nBlue: true,
+  nCoral: true,
+  nDiaryBlue: true,
+  nIceBlue: true,
+  nSkyBlue: true,
+};
+
+const NMatchedPressDiagonalRatio: Partial<Record<DiaryButtonVariant, number>> = {
+  nMint: 1,
+  nAmber: 1,
+  nBlue: 1,
+  nCoral: 1,
+  nDiaryBlue: 1,
+  nIceBlue: 1,
+  nSkyBlue: 1,
+};
+
+function DiaryButtonConcepts() {
   return (
-    <View style={styles.diaryPaperStack}>
-      <View style={styles.diaryPaperBack} />
-      <View style={[styles.diaryPaper, { backgroundColor: entry.color }]}>
-        <ThemedText style={styles.diaryPaperDate}>{entry.date}</ThemedText>
-        <ThemedText style={styles.diaryPaperBody} selectable>
-          {entry.body}
-        </ThemedText>
+    <View style={styles.diaryVariantGrid}>
+      {DiaryButtonVariants.map((variant) => (
+        <View key={variant.id} style={styles.diaryVariantCell}>
+          <View style={styles.diaryVariantBadge}>
+            <ThemedText style={styles.diaryVariantBadgeText}>{variant.label}</ThemedText>
+          </View>
+          <DiaryConceptButton
+            entry={DiaryConceptEntries[variant.entryIndex]}
+            variant={variant.id}
+          />
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function DiaryCardSourceShelf() {
+  return (
+    <View style={styles.diarySourceShelf}>
+      <View style={styles.diarySourceHeader}>
+        <ThemedText style={styles.diarySourceTitle}>Dynamic Paper Set</ThemedText>
+        <View style={styles.diarySourceRange}>
+          <ThemedText style={styles.diarySourceRangeText}>Press Surface</ThemedText>
+        </View>
+      </View>
+
+      <View style={styles.diarySourceGrid}>
+        {DiaryCardSourceVariants.map((variant) => (
+          <View key={variant.id} style={styles.diarySourceCell}>
+            <View style={styles.diarySourceLabel}>
+              <ThemedText style={styles.diarySourceLabelText}>{variant.label}</ThemedText>
+            </View>
+            <DiaryConceptButton
+              entry={DiaryConceptEntries[variant.entryIndex]}
+              variant={variant.id}
+            />
+          </View>
+        ))}
       </View>
     </View>
   );
+}
+
+function StaticPaperPressShelf() {
+  return (
+    <View style={styles.staticPaperShelf}>
+      <View style={styles.staticPaperHeader}>
+        <ThemedText style={styles.staticPaperTitle}>Static Paper Set</ThemedText>
+        <View style={styles.staticPaperRange}>
+          <ThemedText style={styles.staticPaperRangeText}>Read Surface</ThemedText>
+        </View>
+      </View>
+
+      <View style={styles.staticPaperGrid}>
+        {StaticPaperPressVariants.map((variant) => (
+          <View key={variant.id} style={styles.staticPaperCell}>
+            <View style={styles.staticPaperLabel}>
+              <ThemedText style={styles.staticPaperLabelText}>{variant.label}</ThemedText>
+            </View>
+            <StaticPaperPressCard variant={variant} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function StaticPaperPressCard({ variant }: { variant: (typeof StaticPaperPressVariants)[number] }) {
+  return (
+    <View
+      accessibilityRole="summary"
+      style={[
+        styles.staticPaperSurface,
+        styles.staticPaperTray,
+        {
+          backgroundColor: variant.trayColor,
+          borderWidth: variant.trayBorderWidth,
+        },
+      ]}>
+      <View
+        style={[
+          styles.staticPaperTrayPaper,
+          {
+            backgroundColor: variant.paperColor,
+            borderWidth: variant.paperBorderWidth,
+          },
+        ]}>
+        <ThemedText style={styles.staticPaperBody}>{DiaryConceptEntries[0].body}</ThemedText>
+      </View>
+    </View>
+  );
+}
+
+function DynamicStampShelf() {
+  return (
+    <View style={styles.dynamicStampShelf}>
+      <View style={styles.dynamicStampHeader}>
+        <ThemedText style={styles.dynamicStampTitle}>Dynamic Stamp Set</ThemedText>
+        <View style={styles.dynamicStampRange}>
+          <ThemedText style={styles.dynamicStampRangeText}>Stamp Motion</ThemedText>
+        </View>
+      </View>
+
+      <View style={styles.dynamicStampGrid}>
+        {DynamicStampVariants.map((variant) => (
+          <View key={variant.id} style={styles.dynamicStampCell}>
+            <View style={styles.dynamicStampLabel}>
+              <ThemedText style={styles.dynamicStampLabelText}>{variant.label}</ThemedText>
+            </View>
+            <DynamicStampCard variant={variant} />
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function DynamicStampCard({ variant }: { variant: (typeof DynamicStampVariants)[number] }) {
+  return (
+    <FoundationSurface
+      onPress={noopPress}
+      haptic="selection"
+      accessibilityLabel={`日記を開く: ${DiaryConceptEntries[1].body}`}
+      foundationDepth={12}
+      foundationDistanceScale={0.72}
+      foundationDirection="diagonal"
+      foundationColor={variant.foundationColor}
+      foundationBorderColor="#111111"
+      foundationBorderWidth={variant.foundationBorderWidth}
+      foundationOffsetX={variant.offset}
+      foundationOffsetY={variant.offset}
+      foundationRadiusMode="concentric"
+      pressedOffsetX={variant.pressedOffset}
+      pressedOffsetY={variant.pressedOffset}
+      pressTravelRatio={0.36}
+      pressDiagonalRatio={1}
+      pressInDuration={142}
+      pressOutDuration={variant.pressOutDuration}
+      containerStyle={styles.dynamicStampSurface}
+      style={[styles.dynamicStampCard, { backgroundColor: variant.frontColor }]}>
+      <ThemedText style={[styles.dynamicStampBody, { color: variant.textColor }]}>
+        {DiaryConceptEntries[1].body}
+      </ThemedText>
+    </FoundationSurface>
+  );
+}
+
+function ChicAccentShelf() {
+  return (
+    <View style={styles.chicAccentShelf}>
+      <View style={styles.chicAccentHeader}>
+        <ThemedText style={styles.chicAccentTitle}>Chic Accent Set</ThemedText>
+        <View style={styles.chicAccentRange}>
+          <ThemedText style={styles.chicAccentRangeText}>Muted Accent</ThemedText>
+        </View>
+      </View>
+
+      <View style={styles.chicAccentGrid}>
+        {ChicAccentVariants.map((variant) => (
+          <View key={variant.id} style={styles.chicAccentCell}>
+            <View style={styles.chicAccentLabelRow}>
+              <View
+                style={[
+                  styles.chicAccentSwatch,
+                  { backgroundColor: variant.accentColor },
+                ]}
+              />
+              <ThemedText style={styles.chicAccentLabelText}>{variant.label}</ThemedText>
+            </View>
+
+            <View style={styles.chicAccentPairRow}>
+              <ChicAccentCard mode={ChicAccentModes.dark} accentColor={variant.accentColor} />
+              <ChicAccentCard mode={ChicAccentModes.light} accentColor={variant.accentColor} />
+            </View>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function ChicAccentCard({
+  accentColor,
+  mode,
+}: {
+  accentColor: string;
+  mode: (typeof ChicAccentModes)[keyof typeof ChicAccentModes];
+}) {
+  return (
+    <View style={styles.chicAccentSample}>
+      <View style={styles.chicAccentTag}>
+        <ThemedText style={styles.chicAccentTagText}>{mode.label}</ThemedText>
+      </View>
+
+      <FoundationSurface
+        onPress={noopPress}
+        haptic="selection"
+        accessibilityLabel={`日記を開く: ${DiaryConceptEntries[1].body}`}
+        foundationDepth={12}
+        foundationDistanceScale={0.72}
+        foundationDirection="diagonal"
+        foundationColor={accentColor}
+        foundationBorderColor="#111111"
+        foundationBorderWidth={0}
+        foundationOffsetX={PaperPressRestOffset}
+        foundationOffsetY={PaperPressRestOffset}
+        foundationRadiusMode="concentric"
+        pressTravelRatio={0.36}
+        pressDiagonalRatio={1}
+        pressInDuration={142}
+        pressOutDuration={270}
+        containerStyle={styles.chicAccentSurface}
+        style={[styles.chicAccentCard, { backgroundColor: mode.frontColor }]}>
+        <ThemedText style={[styles.chicAccentBody, { color: mode.textColor }]}>
+          {DiaryConceptEntries[1].body}
+        </ThemedText>
+      </FoundationSurface>
+    </View>
+  );
+}
+
+function DiaryConceptButton({
+  entry,
+  variant,
+}: {
+  entry: DiaryConceptEntry;
+  variant: DiaryButtonVariant;
+}) {
+  if (variant === 'spine') {
+    return (
+      <FoundationSurface
+        onPress={noopPress}
+        haptic="selection"
+        accessibilityLabel={`日記を開く: ${entry.body}`}
+        foundationDepth={7}
+        foundationDistanceScale={0.7}
+        foundationDirection="down"
+        foundationColor="#111111"
+        pressTravelRatio={0.38}
+        pressInDuration={132}
+        pressOutDuration={228}
+        containerStyle={styles.diaryConceptSurface}
+        style={[styles.diaryConceptCard, styles.diarySpineCard]}>
+        <View style={styles.diarySpineRail}>
+          <View style={styles.diarySpineDot} />
+          <View style={styles.diarySpineDot} />
+        </View>
+        <ThemedText style={styles.diaryConceptBody}>
+          {entry.body}
+        </ThemedText>
+      </FoundationSurface>
+    );
+  }
+
+  if (variant === 'tray') {
+    return (
+      <FoundationSurface
+        onPress={noopPress}
+        haptic="selection"
+        accessibilityLabel={`日記を開く: ${entry.body}`}
+        foundationDepth={9}
+        foundationDistanceScale={0.6}
+        foundationDirection="diagonal"
+        foundationColor="#111111"
+        pressTravelRatio={0.26}
+        pressDiagonalRatio={0.16}
+        pressInDuration={128}
+        pressOutDuration={250}
+        containerStyle={styles.diaryConceptSurface}
+        style={[styles.diaryTrayCard]}>
+        <View style={styles.diaryTrayPaper}>
+          <ThemedText style={styles.diaryTrayBody}>
+            {entry.body}
+          </ThemedText>
+        </View>
+      </FoundationSurface>
+    );
+  }
+
+  const nFoundationColor = NFoundationColors[variant];
+  if (nFoundationColor) {
+    return (
+      <FoundationSurface
+        onPress={noopPress}
+        haptic="selection"
+        accessibilityLabel={`日記を開く: ${entry.body}`}
+        foundationDepth={12}
+        foundationDistanceScale={0.72}
+        foundationDirection="diagonal"
+        foundationColor={nFoundationColor}
+        foundationBorderColor="#111111"
+        foundationBorderWidth={NMatchedFoundationBorderWidth[variant] ?? 3}
+        foundationOffsetX={NMatchedFoundationOffset[variant]}
+        foundationOffsetY={NMatchedFoundationOffset[variant]}
+        foundationRadiusMode={NConcentricFoundationRadiusVariants[variant] ? 'concentric' : 'same'}
+        pressTravelRatio={0.36}
+        pressDiagonalRatio={NMatchedPressDiagonalRatio[variant] ?? 0.2}
+        pressInDuration={142}
+        pressOutDuration={270}
+        containerStyle={styles.diaryConceptSurface}
+        style={[
+          styles.diaryConceptCard,
+          styles.diaryBaseCreamCard,
+          NCardColors[variant] ? { backgroundColor: NCardColors[variant] } : null,
+        ]}>
+        <ThemedText style={styles.diaryConceptBody}>
+          {entry.body}
+        </ThemedText>
+      </FoundationSurface>
+    );
+  }
+
+  return null;
 }
 
 function RaisedPanel({
@@ -339,6 +1223,12 @@ export default function DesignLabScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const palette = useDailyPalette();
   const { width } = useWindowDimensions();
+  const horizontalPaddingLeft = Math.max(safeAreaInsets.left, Spacing.three);
+  const horizontalPaddingRight = Math.max(safeAreaInsets.right, Spacing.three);
+  const containerMaxWidth: ViewStyle['maxWidth'] =
+    process.env.EXPO_OS === 'web'
+      ? (`min(${MaxContentWidth}px, 100vw)` as ViewStyle['maxWidth'])
+      : MaxContentWidth;
   const boardColumnWidth: ViewStyle['width'] = width >= 760 ? '48.2%' : '100%';
 
   return (
@@ -350,20 +1240,32 @@ export default function DesignLabScreen() {
           styles.content,
           {
             paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
-            paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
-            paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
           },
         ]}>
-        <View style={styles.container}>
-          <LabSectionHeader
-            eyebrow="new direction"
-            title="Pressboard"
-            description="土台付きボタンの物理感を、画面全体の紙片・版・押し出し操作に広げた案。"
-          />
-
+        <View
+          style={[
+            styles.container,
+            {
+              maxWidth: containerMaxWidth,
+              paddingLeft: horizontalPaddingLeft,
+              paddingRight: horizontalPaddingRight,
+            },
+          ]}>
           <ButtonSourceShelf />
 
-          <DiaryTabConcept />
+          <ColorSystemShelf />
+
+          <ColorfulGlideShelf />
+
+          <DiaryCardSourceShelf />
+
+          <StaticPaperPressShelf />
+
+          <DynamicStampShelf />
+
+          <ChicAccentShelf />
+
+          <DiaryButtonConcepts />
 
           <View style={styles.pressboard}>
             <PressboardHeader />
@@ -394,36 +1296,15 @@ const styles = StyleSheet.create({
   },
   content: {
     alignItems: 'center',
+    width: '100%',
+    boxSizing: 'border-box',
     paddingTop: Spacing.three,
   },
   container: {
     width: '100%',
     maxWidth: MaxContentWidth,
+    boxSizing: 'border-box',
     gap: Spacing.four,
-  },
-  sectionHeader: {
-    gap: Spacing.two,
-  },
-  sectionEyebrow: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    backgroundColor: '#E8F7F4',
-    paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.one,
-  },
-  sectionEyebrowText: {
-    color: '#088A81',
-  },
-  labTitle: {
-    fontSize: 34,
-    lineHeight: 40,
-    fontWeight: 900,
-  },
-  labDescription: {
-    color: '#5F6670',
-    fontSize: 15,
-    lineHeight: 23,
-    fontWeight: 700,
   },
   buttonSourceShelf: {
     borderRadius: 24,
@@ -453,7 +1334,8 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   buttonSourceSample: {
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
+    alignSelf: 'stretch',
     gap: Spacing.one,
   },
   buttonSourceLabel: {
@@ -462,93 +1344,581 @@ const styles = StyleSheet.create({
     lineHeight: 14,
     fontWeight: 900,
   },
-  diaryTabMockup: {
-    borderRadius: 26,
+  colorSystemShelf: {
+    borderRadius: 24,
     borderCurve: 'continuous',
-    borderWidth: 4,
+    borderWidth: 3,
     borderColor: '#111111',
-    backgroundColor: '#DFF4EC',
+    backgroundColor: '#FFF6E7',
     gap: Spacing.three,
     padding: Spacing.three,
-    boxShadow: '0 18px 0 rgba(8, 138, 129, 0.16)',
   },
-  diaryHero: {
+  colorSystemHeader: {
+    alignItems: 'flex-start',
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.three,
-    alignItems: 'flex-end',
-  },
-  diaryHeroCopy: {
-    flex: 1,
-    minWidth: 240,
     gap: Spacing.two,
+    justifyContent: 'space-between',
   },
-  diaryHeroKicker: {
-    alignSelf: 'flex-start',
+  colorSystemCopy: {
+    flex: 1,
+    minWidth: 220,
+    gap: Spacing.one,
+  },
+  colorSystemTitle: {
+    color: '#111111',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: 900,
+  },
+  colorSystemDescription: {
+    color: '#5C4B32',
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: 800,
+  },
+  colorSystemAxisBadge: {
     borderRadius: 999,
     borderWidth: 3,
     borderColor: '#111111',
-    backgroundColor: '#FFF9EC',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    backgroundColor: '#65D7F2',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
   },
-  diaryHeroKickerText: {
+  colorSystemAxisText: {
     color: '#111111',
     fontSize: 11,
     lineHeight: 14,
     fontWeight: 900,
   },
-  diaryHeroTitle: {
+  colorSystemSwatchGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  colorSystemSwatchCard: {
+    width: '48%',
+    minWidth: 148,
+    flexGrow: 1,
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+  },
+  colorSystemSwatch: {
+    height: 54,
+    borderBottomWidth: 3,
+    borderColor: '#111111',
+  },
+  colorSystemSwatchText: {
+    gap: 2,
+    padding: Spacing.two,
+  },
+  colorSystemRole: {
+    color: '#6E604C',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: 900,
+    textTransform: 'uppercase',
+  },
+  colorSystemLabel: {
     color: '#111111',
-    fontSize: 30,
-    lineHeight: 36,
+    fontSize: 15,
+    lineHeight: 19,
     fontWeight: 900,
   },
-  diaryHeroText: {
-    color: '#244A42',
-    fontSize: 14,
-    lineHeight: 21,
-    fontWeight: 800,
-  },
-  diaryPaperList: {
-    gap: Spacing.three,
-  },
-  diaryPaperStack: {
-    position: 'relative',
-    paddingRight: 9,
-    paddingBottom: 10,
-  },
-  diaryPaperBack: {
-    position: 'absolute',
-    left: 9,
-    top: 10,
-    right: 0,
-    bottom: 0,
-    borderRadius: 20,
-    borderCurve: 'continuous',
-    borderWidth: 3,
-    borderColor: '#111111',
-    backgroundColor: '#BDEBDD',
-  },
-  diaryPaper: {
-    borderRadius: 20,
-    borderCurve: 'continuous',
-    borderWidth: 3,
-    borderColor: '#111111',
-    gap: Spacing.two,
-    padding: Spacing.three,
-  },
-  diaryPaperDate: {
-    color: '#088A81',
+  colorSystemNote: {
+    color: '#4F4B43',
     fontSize: 12,
     lineHeight: 16,
+    fontWeight: 800,
+  },
+  colorSystemHex: {
+    color: '#6E604C',
+    fontSize: 10,
+    lineHeight: 13,
     fontWeight: 900,
   },
-  diaryPaperBody: {
+  colorSystemFlow: {
+    gap: Spacing.two,
+  },
+  colorfulGlideShelf: {
+    borderRadius: 24,
+    borderCurve: 'continuous',
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#F7F0FF',
+    gap: Spacing.three,
+    padding: Spacing.three,
+  },
+  colorfulGlideHeader: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    justifyContent: 'space-between',
+  },
+  colorfulGlideCopy: {
+    flex: 1,
+    minWidth: 220,
+    gap: Spacing.one,
+  },
+  colorfulGlideTitle: {
+    color: '#111111',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: 900,
+  },
+  colorfulGlideDescription: {
+    color: '#51445F',
+    fontSize: 13,
+    lineHeight: 20,
+    fontWeight: 800,
+  },
+  colorfulGlideBadge: {
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#F4E75E',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  colorfulGlideBadgeText: {
+    color: '#111111',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: 900,
+  },
+  colorfulGlideGrid: {
+    gap: Spacing.two,
+  },
+  colorfulGlideCell: {
+    alignSelf: 'stretch',
+    gap: Spacing.one,
+  },
+  colorfulGlideLabel: {
+    color: '#4F4362',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: 900,
+    textTransform: 'uppercase',
+  },
+  colorfulCompactRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  diaryVariantGrid: {
+    gap: Spacing.three,
+  },
+  diaryVariantCell: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+  },
+  diaryVariantBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#2FDD6C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  diaryVariantBadgeText: {
+    color: '#111111',
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: 900,
+  },
+  diarySourceShelf: {
+    borderTopWidth: 3,
+    borderBottomWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#E8F7F4',
+    gap: Spacing.three,
+    paddingVertical: Spacing.three,
+  },
+  diarySourceHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    justifyContent: 'space-between',
+  },
+  diarySourceTitle: {
+    color: '#111111',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: 900,
+  },
+  diarySourceRange: {
+    borderRadius: 999,
+    backgroundColor: '#111111',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  diarySourceRangeText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: 900,
+  },
+  diarySourceGrid: {
+    gap: Spacing.three,
+  },
+  diarySourceCell: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+  },
+  diarySourceLabel: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#FFF9EC',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  diarySourceLabelText: {
+    color: '#111111',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: 900,
+  },
+  staticPaperShelf: {
+    borderRadius: 22,
+    borderCurve: 'continuous',
+    backgroundColor: '#FFF7F5',
+    gap: Spacing.three,
+    padding: Spacing.three,
+  },
+  staticPaperHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    justifyContent: 'space-between',
+  },
+  staticPaperTitle: {
+    color: '#111111',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: 900,
+  },
+  staticPaperRange: {
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#FFF0EC',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  staticPaperRangeText: {
+    color: '#111111',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: 900,
+  },
+  staticPaperGrid: {
+    gap: Spacing.three,
+  },
+  staticPaperCell: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+  },
+  staticPaperLabel: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: '#111111',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  staticPaperLabelText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: 900,
+  },
+  staticPaperSurface: {
+    alignSelf: 'stretch',
+  },
+  staticPaperTray: {
+    width: '100%',
+    boxSizing: 'border-box',
+    borderRadius: 24,
+    borderCurve: 'continuous',
+    borderColor: '#111111',
+    minHeight: 148,
+    padding: StaticPaperInset,
+  },
+  staticPaperTrayPaper: {
+    flex: 1,
+    borderRadius: 17,
+    borderCurve: 'continuous',
+    borderColor: '#111111',
+    padding: Spacing.three,
+  },
+  staticPaperBody: {
+    color: '#111111',
+    fontSize: 18,
+    lineHeight: 29,
+    fontWeight: 800,
+  },
+  dynamicStampShelf: {
+    borderRadius: 22,
+    borderCurve: 'continuous',
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#DDE7E1',
+    gap: Spacing.three,
+    padding: Spacing.three,
+  },
+  dynamicStampHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    justifyContent: 'space-between',
+  },
+  dynamicStampTitle: {
+    color: '#111111',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: 900,
+  },
+  dynamicStampRange: {
+    borderRadius: 999,
+    backgroundColor: '#2FDD6C',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  dynamicStampRangeText: {
+    color: '#111111',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: 900,
+  },
+  dynamicStampGrid: {
+    gap: Spacing.three,
+  },
+  dynamicStampCell: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+  },
+  dynamicStampLabel: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#111111',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  dynamicStampLabelText: {
+    color: '#FFF9EC',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: 900,
+  },
+  dynamicStampSurface: {
+    alignSelf: 'stretch',
+  },
+  dynamicStampCard: {
+    width: '100%',
+    boxSizing: 'border-box',
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    backgroundColor: '#111111',
+    minHeight: 140,
+    padding: Spacing.three,
+  },
+  dynamicStampBody: {
+    color: '#FFF9EC',
+    fontSize: 18,
+    lineHeight: 29,
+    fontWeight: 900,
+  },
+  chicAccentShelf: {
+    borderRadius: 22,
+    borderCurve: 'continuous',
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#DCD8CF',
+    gap: Spacing.three,
+    padding: Spacing.three,
+  },
+  chicAccentHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+    justifyContent: 'space-between',
+  },
+  chicAccentTitle: {
+    color: '#111111',
+    fontSize: 20,
+    lineHeight: 25,
+    fontWeight: 900,
+  },
+  chicAccentRange: {
+    borderRadius: 999,
+    backgroundColor: '#111111',
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+  },
+  chicAccentRangeText: {
+    color: '#FFF9EC',
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: 900,
+  },
+  chicAccentGrid: {
+    gap: Spacing.three,
+  },
+  chicAccentCell: {
+    alignSelf: 'stretch',
+    gap: Spacing.two,
+  },
+  chicAccentLabelRow: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#FFF9EC',
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  chicAccentSwatch: {
+    width: 16,
+    height: 16,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderColor: '#111111',
+  },
+  chicAccentLabelText: {
+    color: '#111111',
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: 900,
+  },
+  chicAccentPairRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.two,
+  },
+  chicAccentSample: {
+    flex: 1,
+    minWidth: 154,
+    gap: Spacing.one,
+  },
+  chicAccentTag: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    backgroundColor: '#111111',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+  },
+  chicAccentTagText: {
+    color: '#FFF9EC',
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: 900,
+  },
+  chicAccentSurface: {
+    alignSelf: 'stretch',
+  },
+  chicAccentCard: {
+    width: '100%',
+    boxSizing: 'border-box',
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    minHeight: 132,
+    padding: Spacing.two,
+  },
+  chicAccentBody: {
+    fontSize: 15,
+    lineHeight: 24,
+    fontWeight: 900,
+  },
+  diaryConceptCard: {
+    width: '100%',
+    boxSizing: 'border-box',
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: '#111111',
+    minHeight: 140,
+    padding: Spacing.three,
+  },
+  diaryConceptBody: {
+    flex: 1,
+    flexShrink: 1,
+    color: '#111111',
+    fontSize: 18,
+    lineHeight: 29,
+    fontWeight: 900,
+  },
+  diarySpineCard: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: Spacing.three,
+    backgroundColor: '#FFFFFF',
+    paddingLeft: Spacing.two,
+  },
+  diarySpineRail: {
+    width: 20,
+    borderRadius: 999,
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#FF7661',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: Spacing.two,
+  },
+  diarySpineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    backgroundColor: '#111111',
+  },
+  diaryTrayCard: {
+    width: '100%',
+    boxSizing: 'border-box',
+    borderRadius: 24,
+    borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: '#111111',
+    backgroundColor: '#2FDD6C',
+    minHeight: 148,
+    padding: Spacing.two,
+  },
+  diaryTrayPaper: {
+    flex: 1,
+    borderRadius: 17,
+    borderCurve: 'continuous',
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#FFF9EC',
+    padding: Spacing.three,
+  },
+  diaryTrayBody: {
+    flexShrink: 1,
     color: '#111111',
     fontSize: 17,
     lineHeight: 28,
-    fontWeight: 800,
+    fontWeight: 900,
+  },
+  diaryConceptSurface: {
+    alignSelf: 'stretch',
+  },
+  diaryBaseCreamCard: {
+    backgroundColor: '#FFF9EC',
   },
   pressboard: {
     borderRadius: 26,

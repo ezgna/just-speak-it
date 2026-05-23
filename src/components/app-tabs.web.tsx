@@ -31,6 +31,9 @@ export default function AppTabs() {
           <TabTrigger name="flashcards" href="/flashcards" asChild>
             <TabButton>復習</TabButton>
           </TabTrigger>
+          <TabTrigger name="settings" href="/settings" asChild>
+            <TabButton>設定</TabButton>
+          </TabTrigger>
         </CustomTabList>
       </TabList>
     </Tabs>
@@ -56,7 +59,7 @@ export function CustomTabList(props: TabListProps) {
     <View {...props} style={styles.tabListContainer}>
       <ThemedView type="backgroundElement" style={styles.innerContainer}>
         <ThemedText type="smallBold" style={styles.brandText}>
-          Daily to English
+          Just Speak It
         </ThemedText>
         <View style={styles.tabsWrapper}>{props.children}</View>
       </ThemedView>

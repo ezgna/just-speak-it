@@ -1,11 +1,11 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
-import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { useResolvedColorScheme } from '@/hooks/use-theme-preference';
 
 export default function AppTabs() {
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+  const scheme = useResolvedColorScheme();
+  const colors = Colors[scheme];
 
   return (
     <NativeTabs
@@ -38,6 +38,14 @@ export default function AppTabs() {
 
       <NativeTabs.Trigger name="flashcards" disableAutomaticContentInsets>
         <NativeTabs.Trigger.Label>復習</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          src={require('@/assets/images/tabIcons/explore.png')}
+          renderingMode="template"
+        />
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="settings" disableAutomaticContentInsets>
+        <NativeTabs.Trigger.Label>設定</NativeTabs.Trigger.Label>
         <NativeTabs.Trigger.Icon
           src={require('@/assets/images/tabIcons/explore.png')}
           renderingMode="template"

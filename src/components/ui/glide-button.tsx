@@ -7,8 +7,21 @@ import {
   type FoundationSurfaceDirection,
 } from '@/components/ui/foundation-surface';
 
-export type GlideButtonTone = 'mint' | 'blue' | 'cream' | 'amber' | 'coral' | 'green';
-export type GlideButtonSize = 'large' | 'medium' | 'compact';
+export type GlideButtonTone =
+  | 'mint'
+  | 'blue'
+  | 'cream'
+  | 'amber'
+  | 'coral'
+  | 'green'
+  | 'sky'
+  | 'violet'
+  | 'pink'
+  | 'lemon'
+  | 'orange'
+  | 'aqua'
+  | 'grape';
+export type GlideButtonSize = 'extraLarge' | 'large' | 'medium' | 'compact';
 
 const AdoptedFoundationDistance = 0.56;
 const FoundationBorderColor = '#111111';
@@ -51,6 +64,41 @@ const GlideTones: Record<
     textColor: '#111111',
     accentColor: '#111111',
   },
+  sky: {
+    backgroundColor: '#9FD0F8',
+    textColor: '#111111',
+    accentColor: '#111111',
+  },
+  violet: {
+    backgroundColor: '#9B7CFF',
+    textColor: '#111111',
+    accentColor: '#111111',
+  },
+  pink: {
+    backgroundColor: '#FF8DA1',
+    textColor: '#111111',
+    accentColor: '#111111',
+  },
+  lemon: {
+    backgroundColor: '#F4E75E',
+    textColor: '#111111',
+    accentColor: '#111111',
+  },
+  orange: {
+    backgroundColor: '#FF9F45',
+    textColor: '#111111',
+    accentColor: '#111111',
+  },
+  aqua: {
+    backgroundColor: '#65D7F2',
+    textColor: '#111111',
+    accentColor: '#111111',
+  },
+  grape: {
+    backgroundColor: '#6E56CF',
+    textColor: '#FFFFFF',
+    accentColor: '#FFFFFF',
+  },
 };
 
 const GlideSizeMetrics: Record<
@@ -67,6 +115,17 @@ const GlideSizeMetrics: Record<
     paddingVertical: number;
   }
 > = {
+  extraLarge: {
+    borderRadius: 20,
+    borderWidth: 4,
+    foundationDepth: 10,
+    iconSize: 20,
+    labelLineHeight: 29,
+    labelSize: 18,
+    minHeight: 140,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
+  },
   large: {
     borderRadius: 12,
     borderWidth: 4,
@@ -126,6 +185,8 @@ export function GlideButton({
   direction = 'diagonal',
   containerStyle,
   disabled = false,
+  pressed = false,
+  holdPressOut = false,
   accessibilityLabel,
   onPress = noopPress,
 }: {
@@ -139,12 +200,15 @@ export function GlideButton({
   direction?: FoundationSurfaceDirection;
   containerStyle?: StyleProp<ViewStyle>;
   disabled?: boolean;
+  pressed?: boolean;
+  holdPressOut?: boolean;
   accessibilityLabel?: string;
   onPress?: () => void;
 }) {
   const toneStyle = GlideTones[tone];
   const sizeMetrics = GlideSizeMetrics[size];
   const compact = size === 'compact';
+  const extraLarge = size === 'extraLarge';
   const hasCaption = Boolean(caption);
   const paddingVertical = hasCaption && size === 'large' ? 11 : sizeMetrics.paddingVertical;
 
@@ -153,6 +217,8 @@ export function GlideButton({
       onPress={onPress}
       haptic="selection"
       disabled={disabled}
+      pressed={pressed}
+      holdPressOut={holdPressOut}
       accessibilityLabel={accessibilityLabel ?? label}
       androidRippleColor={hexToRgba(toneStyle.accentColor, tone === 'blue' ? 0.16 : 0.12)}
       foundationDepth={sizeMetrics.foundationDepth}
@@ -180,7 +246,7 @@ export function GlideButton({
       <View
         style={{
           flexDirection: 'row',
-          alignItems: 'center',
+          alignItems: extraLarge ? 'flex-end' : 'center',
           justifyContent: compact ? 'center' : 'space-between',
           gap: 10,
         }}>
@@ -213,7 +279,7 @@ export function GlideButton({
             </ThemedText>
           ) : null}
           <ThemedText
-            numberOfLines={1}
+            numberOfLines={extraLarge ? undefined : 1}
             style={{
               color: toneStyle.textColor,
               fontSize: sizeMetrics.labelSize,
