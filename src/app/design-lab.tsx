@@ -1,4 +1,4 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { SymbolView } from 'expo-symbols';
 import { type ReactNode } from 'react';
 import {
   ScrollView,
@@ -12,11 +12,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
-import {
-  GlideButton,
-  type GlideButtonSize,
-  type GlideButtonTone,
-} from '@/components/ui/glide-button';
+import { GlideButton } from '@/components/ui/glide-button';
+import { GlideTextInput } from '@/components/ui/glide-text-input';
+import { type GlideTone } from '@/components/ui/glide-frame';
 import {
   FOUNDATION_SCROLL_PRESS_DELAY_MS,
   FoundationSurface,
@@ -42,7 +40,7 @@ function ButtonSourceShelf() {
       <View style={styles.buttonSourceGrid}>
         <ButtonSourceSample label="large">
           <GlideButton
-            label="Speak It"
+            label="Speak it"
             tone="mint"
             caption="Core"
             icon={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
@@ -81,107 +79,57 @@ function ButtonSourceSample({ children, label }: { children: ReactNode; label: s
   );
 }
 
-type ColorfulGlideVariant = {
-  caption: string;
+type GlideInputVariant = {
+  accentTone: GlideTone;
   id: string;
   label: string;
-  size?: GlideButtonSize;
-  tone: GlideButtonTone;
-  icon: SymbolViewProps['name'];
+  meta: string;
+  textStyle: 'bold' | 'quiet' | 'wide';
+  tone: GlideTone;
 };
 
-const ColorfulGlideVariants: ColorfulGlideVariant[] = [
-  {
-    id: 'voice',
-    label: 'Speak It',
-    caption: 'はじめる',
-    tone: 'orange',
-    icon: { ios: 'mic.fill', android: 'mic', web: 'mic' },
-  },
-  {
-    id: 'done',
-    label: 'Done',
-    caption: '録音中',
-    tone: 'coral',
-    icon: { ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' },
-  },
-  {
-    id: 'writing',
-    label: 'Writing it up',
-    caption: '処理中',
-    tone: 'sky',
-    icon: { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' },
-  },
-  {
-    id: 'retry',
-    label: 'Try again',
-    caption: '再入力',
-    tone: 'violet',
-    icon: { ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' },
-  },
-  {
-    id: 'diary',
-    label: '日記を見る',
-    caption: '読み返す',
-    tone: 'pink',
-    icon: { ios: 'text.book.closed.fill', android: 'menu_book', web: 'menu_book' },
-  },
-  {
-    id: 'cards',
-    label: '英語カード',
-    caption: 'つくる',
-    tone: 'lemon',
-    icon: { ios: 'rectangle.stack.fill', android: 'view_carousel', web: 'view_carousel' },
-  },
-  {
-    id: 'review',
-    label: '復習する',
-    caption: 'あとで言える',
-    tone: 'grape',
-    icon: { ios: 'bolt.fill', android: 'bolt', web: 'bolt' },
-  },
-  {
-    id: 'save',
-    label: '保存',
-    caption: 'ログに残す',
-    tone: 'aqua',
-    size: 'medium',
-    icon: { ios: 'tray.and.arrow.down.fill', android: 'save', web: 'save' },
-  },
-];
+const ColorSystemColors = {
+  core: '#2FDD6C',
+  warm: '#FF9F45',
+  cool: '#65D7F2',
+  shift: '#9B7CFF',
+  accent: '#FF7661',
+  spark: '#F4E75E',
+  paper: '#FFF6E7',
+} as const;
 
-const ColorfulGlideCompactVariants: ColorfulGlideVariant[] = [
+const GlideInputVariants: GlideInputVariant[] = [
   {
-    id: 'today',
-    label: '今日',
-    caption: '',
-    tone: 'orange',
-    size: 'compact',
-    icon: { ios: 'sun.max.fill', android: 'light_mode', web: 'light_mode' },
+    id: 'cream-lift',
+    label: 'Paper Core',
+    meta: 'paper / core',
+    tone: 'cream',
+    accentTone: 'mint',
+    textStyle: 'bold',
   },
   {
-    id: 'note',
-    label: '日記',
-    caption: '',
-    tone: 'pink',
-    size: 'compact',
-    icon: { ios: 'book.fill', android: 'book', web: 'book' },
+    id: 'mint-rail',
+    label: 'Core Rail',
+    meta: 'core / cool',
+    tone: 'mint',
+    accentTone: 'aqua',
+    textStyle: 'wide',
   },
   {
-    id: 'english',
-    label: '英語',
-    caption: '',
-    tone: 'sky',
-    size: 'compact',
-    icon: { ios: 'textformat', android: 'translate', web: 'translate' },
+    id: 'ink-press',
+    label: 'Cool Press',
+    meta: 'cool / shift',
+    tone: 'aqua',
+    accentTone: 'violet',
+    textStyle: 'bold',
   },
   {
-    id: 'reviewCompact',
-    label: '復習',
-    caption: '',
-    tone: 'grape',
-    size: 'compact',
-    icon: { ios: 'bolt.fill', android: 'bolt', web: 'bolt' },
+    id: 'coral-stamp',
+    label: 'Warm Stamp',
+    meta: 'accent / warm',
+    tone: 'coral',
+    accentTone: 'orange',
+    textStyle: 'quiet',
   },
 ];
 
@@ -197,50 +145,50 @@ const CoreColorSystemRoles: ColorSystemRole[] = [
   {
     id: 'primary',
     role: 'Core',
-    label: 'Speak It',
-    color: '#2FDD6C',
+    label: 'Speak it',
+    color: ColorSystemColors.core,
     note: '入口 / 主役',
   },
   {
     id: 'done',
     role: 'Warm',
     label: 'Done',
-    color: '#FF9F45',
+    color: ColorSystemColors.warm,
     note: '完了 / 決定',
   },
   {
     id: 'process',
     role: 'Cool',
     label: 'Writing',
-    color: '#65D7F2',
+    color: ColorSystemColors.cool,
     note: '処理 / 変換',
   },
   {
     id: 'retry',
     role: 'Shift',
     label: 'Try again',
-    color: '#9B7CFF',
+    color: ColorSystemColors.shift,
     note: '戻る / 再試行',
   },
   {
     id: 'alert',
     role: 'Accent',
     label: 'Alert',
-    color: '#FF7661',
+    color: ColorSystemColors.accent,
     note: '注意 / 強調',
   },
   {
     id: 'fun',
     role: 'Spark',
     label: 'Play',
-    color: '#F4E75E',
+    color: ColorSystemColors.spark,
     note: '楽しさ / 報酬',
   },
   {
     id: 'paper',
     role: 'Paper',
     label: 'Surface',
-    color: '#FFF6E7',
+    color: ColorSystemColors.paper,
     note: '背景 / 読み物',
   },
 ] as const;
@@ -276,7 +224,7 @@ function ColorSystemShelf() {
 
       <View style={styles.colorSystemFlow}>
         <GlideButton
-          label="Speak It"
+          label="Speak it"
           caption="Core"
           tone="mint"
           icon={{ ios: 'mic.fill', android: 'mic', web: 'mic' }}
@@ -304,49 +252,52 @@ function ColorSystemShelf() {
   );
 }
 
-function ColorfulGlideShelf() {
+function GlideInputShelf() {
   return (
-    <View style={styles.colorfulGlideShelf}>
-      <View style={styles.colorfulGlideHeader}>
-        <View style={styles.colorfulGlideCopy}>
-          <ThemedText style={styles.colorfulGlideTitle}>Colorful Glide Set</ThemedText>
-          <ThemedText style={styles.colorfulGlideDescription}>
-            緑だけに寄せず、入口・完了・処理・復習を色で分ける案。
+    <View style={styles.glideInputShelf}>
+      <View style={styles.glideInputHeader}>
+        <View style={styles.glideInputCopy}>
+          <ThemedText style={styles.glideInputTitle}>Glide Input Set</ThemedText>
+          <ThemedText style={styles.glideInputDescription}>
+            今日タブの入力欄をGlide Buttonの土台・枠・色面に合わせる比較案。
           </ThemedText>
         </View>
-        <View style={styles.colorfulGlideBadge}>
-          <ThemedText style={styles.colorfulGlideBadgeText}>Playful</ThemedText>
+        <View style={styles.glideInputBadge}>
+          <ThemedText style={styles.glideInputBadgeText}>Draft Field</ThemedText>
         </View>
       </View>
 
-      <View style={styles.colorfulGlideGrid}>
-        {ColorfulGlideVariants.map((variant) => (
-          <View key={variant.id} style={styles.colorfulGlideCell}>
-            <ThemedText style={styles.colorfulGlideLabel}>{variant.tone}</ThemedText>
-            <GlideButton
-              label={variant.label}
-              caption={variant.caption}
-              icon={variant.icon}
-              tone={variant.tone}
-              size={variant.size}
-            />
-          </View>
+      <View style={styles.glideInputGrid}>
+        {GlideInputVariants.map((variant) => (
+          <GlideInputCard key={variant.id} variant={variant} />
         ))}
       </View>
+    </View>
+  );
+}
 
-      <View style={styles.colorfulCompactRow}>
-        {ColorfulGlideCompactVariants.map((variant) => (
-          <GlideButton
-            key={variant.id}
-            label={variant.label}
-            icon={variant.icon}
-            iconSide="left"
-            tone={variant.tone}
-            size="compact"
-            fullWidth={false}
-          />
-        ))}
-      </View>
+function GlideInputCard({ variant }: { variant: GlideInputVariant }) {
+  const textStyle =
+    variant.textStyle === 'wide'
+      ? styles.glideInputTextWide
+      : variant.textStyle === 'quiet'
+        ? styles.glideInputTextQuiet
+        : styles.glideInputTextBold;
+
+  return (
+    <View style={styles.glideInputCell}>
+      <ThemedText style={styles.glideInputLabel}>{variant.label}</ThemedText>
+      <GlideTextInput
+        tone={variant.tone}
+        accentTone={variant.accentTone}
+        meta={variant.meta}
+        editable={false}
+        value="今日は帰り道に、駅前でコーヒーを買って少し遠回りしました。"
+        accessibilityLabel={`${variant.label}入力欄案`}
+        containerStyle={styles.glideInputSurface}
+        frameStyle={styles.glideInputCard}
+        inputStyle={[styles.glideInputPreview, textStyle]}
+      />
     </View>
   );
 }
@@ -1255,7 +1206,7 @@ export default function DesignLabScreen() {
 
           <ColorSystemShelf />
 
-          <ColorfulGlideShelf />
+          <GlideInputShelf />
 
           <DiaryCardSourceShelf />
 
@@ -1444,71 +1395,94 @@ const styles = StyleSheet.create({
   colorSystemFlow: {
     gap: Spacing.two,
   },
-  colorfulGlideShelf: {
+  glideInputShelf: {
     borderRadius: 24,
     borderCurve: 'continuous',
     borderWidth: 3,
     borderColor: '#111111',
-    backgroundColor: '#F7F0FF',
+    backgroundColor: ColorSystemColors.paper,
     gap: Spacing.three,
     padding: Spacing.three,
   },
-  colorfulGlideHeader: {
+  glideInputHeader: {
     alignItems: 'flex-start',
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
     justifyContent: 'space-between',
   },
-  colorfulGlideCopy: {
+  glideInputCopy: {
     flex: 1,
     minWidth: 220,
     gap: Spacing.one,
   },
-  colorfulGlideTitle: {
+  glideInputTitle: {
     color: '#111111',
     fontSize: 20,
     lineHeight: 25,
     fontWeight: 900,
   },
-  colorfulGlideDescription: {
-    color: '#51445F',
+  glideInputDescription: {
+    color: '#4F4B43',
     fontSize: 13,
     lineHeight: 20,
     fontWeight: 800,
   },
-  colorfulGlideBadge: {
+  glideInputBadge: {
     borderRadius: 999,
     borderWidth: 3,
     borderColor: '#111111',
-    backgroundColor: '#F4E75E',
+    backgroundColor: ColorSystemColors.core,
     paddingHorizontal: 11,
     paddingVertical: 7,
   },
-  colorfulGlideBadgeText: {
+  glideInputBadgeText: {
     color: '#111111',
     fontSize: 11,
     lineHeight: 14,
     fontWeight: 900,
   },
-  colorfulGlideGrid: {
-    gap: Spacing.two,
+  glideInputGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: Spacing.three,
   },
-  colorfulGlideCell: {
-    alignSelf: 'stretch',
+  glideInputCell: {
+    flexGrow: 1,
+    flexBasis: 280,
     gap: Spacing.one,
   },
-  colorfulGlideLabel: {
-    color: '#4F4362',
+  glideInputLabel: {
+    color: '#4F4B43',
     fontSize: 11,
     lineHeight: 14,
     fontWeight: 900,
     textTransform: 'uppercase',
   },
-  colorfulCompactRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
+  glideInputSurface: {
+    alignSelf: 'stretch',
+  },
+  glideInputCard: {
+    minHeight: 190,
+  },
+  glideInputPreview: {
+    minHeight: 116,
+    padding: 0,
+  },
+  glideInputTextBold: {
+    fontSize: 20,
+    lineHeight: 31,
+    fontWeight: 900,
+  },
+  glideInputTextWide: {
+    fontSize: 19,
+    lineHeight: 32,
+    fontWeight: 800,
+  },
+  glideInputTextQuiet: {
+    fontSize: 18,
+    lineHeight: 30,
+    fontWeight: 700,
   },
   diaryVariantGrid: {
     gap: Spacing.three,

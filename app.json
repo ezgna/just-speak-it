@@ -52,7 +52,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Just Speak Itで話した内容を文字起こしして英語練習に変えるため、マイクを使用します。",
+          "microphonePermission": "音声入力のためにマイクを使用します。",
           "enableBackgroundPlayback": false,
           "enableBackgroundRecording": false
         }

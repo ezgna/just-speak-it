@@ -275,6 +275,14 @@ export function FoundationSurface({
     void Haptics.selectionAsync().catch(() => undefined);
   }, [haptic, isInteractive]);
 
+  const handlePress = useCallback(() => {
+    if (holdPressOut) {
+      animateTo(pressX, pressY, 1, pressInDuration, pressInEasing);
+    }
+
+    onPress?.();
+  }, [animateTo, holdPressOut, onPress, pressInDuration, pressInEasing, pressX, pressY]);
+
   return (
     <View
       style={[
@@ -310,14 +318,14 @@ export function FoundationSurface({
             accessibilityLabel={accessibilityLabel}
             accessibilityState={accessibilityState}
             hitSlop={hitSlop}
-            onPress={onPress}
+            onPress={onPress ? handlePress : undefined}
             onLongPress={onLongPress}
             onPressIn={() => {
               triggerHaptic();
               animateTo(pressX, pressY, 1, pressInDuration, pressInEasing);
             }}
             onPressOut={() => {
-              if (pressed || holdPressOut) {
+              if (pressed) {
                 animateTo(pressX, pressY, 1, pressInDuration, pressInEasing);
                 return;
               }
