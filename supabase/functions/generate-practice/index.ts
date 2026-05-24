@@ -6,6 +6,9 @@ type TranslationCard = {
   english: string;
 };
 
+type GenerationMode = 'natural' | 'compact';
+type PracticeGenerationStatus = 'processing' | 'completed' | 'failed';
+
 type GeneratePracticeOutput = {
   diaryText: string;
   cards: TranslationCard[];
@@ -18,11 +21,35 @@ type DiaryEntryRow = {
   raw_transcript_text: string;
   body_text: string;
   content_hash: string;
-  practice_generation_status: 'processing' | 'completed' | 'failed';
+  created_at: string;
+  updated_at: string;
+};
+
+type PracticeGenerationRow = {
+  id: string;
+  user_id: string;
+  diary_entry_id: string;
+  generation_mode: GenerationMode;
+  practice_generation_status: PracticeGenerationStatus;
   practice_generation_error: string | null;
   created_at: string;
   updated_at: string;
 };
+
+type GenerationClaim =
+  | {
+      type: 'claimed';
+      diaryEntry: DiaryEntryRow;
+      practiceGeneration: PracticeGenerationRow;
+    }
+  | {
+      type: 'completed';
+      diaryEntry: DiaryEntryRow;
+      practiceGeneration: PracticeGenerationRow;
+      cards: unknown[];
+    }
+  | { type: 'busy' }
+  | { type: 'error'; status: number; message: string };
 
 const translationCardSchema = {
   type: 'object',
@@ -49,8 +76,10 @@ const translationCardSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, raw_transcript_text, body_text, content_hash, practice_generation_status, practice_generation_error, created_at, updated_at';
-const translationCardSelect = 'id, diary_entry_id, sort_order, japanese, english, created_at';
+  'id, user_id, source, raw_transcript_text, body_text, content_hash, created_at, updated_at';
+const practiceGenerationSelect =
+  'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
+const translationCardSelect = 'id, practice_generation_id, sort_order, japanese, english, created_at';
 const existingGenerationWaitAttempts = 20;
 const existingGenerationWaitMs = 600;
 const processingRetryTimeoutMs = 5 * 60 * 1000;
@@ -91,59 +120,50 @@ export default {
     }
 
     const source = body?.source === 'text' ? 'text' : 'voice';
+    const generationMode = parseGenerationMode(body?.generationMode);
     const contentHash = await createContentHash(cleanedText);
-    const diaryEntryClaim = await claimDiaryEntryForGeneration(generationContext, {
+    const generationClaim = await claimGeneration(generationContext, {
       userId,
       source,
+      generationMode,
       rawTranscriptText,
       cleanedText,
       contentHash,
     });
 
-    if (diaryEntryClaim.type === 'completed') {
+    if (generationClaim.type === 'completed') {
       return jsonResponse({
-        diaryEntry: toPublicDiaryEntry(diaryEntryClaim.diaryEntry),
-        cards: diaryEntryClaim.cards,
+        diaryEntry: toPublicDiaryEntry(generationClaim.diaryEntry),
+        practiceGeneration: toPublicPracticeGeneration(generationClaim.practiceGeneration),
+        cards: generationClaim.cards,
         reused: true,
       });
     }
 
-    if (diaryEntryClaim.type === 'busy') {
+    if (generationClaim.type === 'busy') {
       return errorResponse(
         'この内容の英語カードは作成中です。少し待ってからもう一度確認してください。',
         409
       );
     }
 
-    if (diaryEntryClaim.type === 'error') {
-      return errorResponse(diaryEntryClaim.message, diaryEntryClaim.status);
+    if (generationClaim.type === 'error') {
+      return errorResponse(generationClaim.message, generationClaim.status);
     }
 
-    const claimedDiaryEntry = diaryEntryClaim.diaryEntry;
+    const claimedDiaryEntry = generationClaim.diaryEntry;
+    const claimedPracticeGeneration = generationClaim.practiceGeneration;
 
     const output = await createOpenAIJsonResponse<GeneratePracticeOutput>({
       schemaName: 'daily_to_english_translation_cards',
       schema: translationCardSchema,
-      instructions: [
-        'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
-        '入力は日本語の文字起こし、またはそれを軽く整えた文章です。',
-        'diaryText は日記タブにそのまま全文表示する日本語本文です。',
-        'diaryText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
-        'diaryText は話者の事実と温度感を保ったまま、読める日記文として句読点と文の流れだけを整えてください。',
-        '意味を足さないでください。削りすぎないでください。短い入力は短い日記文のままで構いません。',
-        'そのうえで、英語ならどこまでを一文にするのが自然かを逆算してください。',
-        '日本語の句点や話し言葉の切れ目に引きずられず、英語ネイティブが自然に言う一文ごとのカードに分けてください。',
-        '各カードは japanese と english の一対一にしてください。',
-        'japanese は、その english に対応する日本語の意味の塊だけを入れてください。文の途中で不自然に切らないでください。',
-        'english は説明調ではなく、実際にネイティブが会話や打ち合わせで言う自然な一文にしてください。',
-        'カード数に上限はありません。無理に増やさず、自然に分けられる分だけ返してください。',
-      ].join('\n'),
+      instructions: createPracticeInstructions(generationMode),
       input: cleanedText,
       maxOutputTokens: 2400,
     }).catch(async (error) => {
       await markGenerationFailed(
         generationContext,
-        claimedDiaryEntry.id,
+        claimedPracticeGeneration.id,
         error instanceof Error ? error.message : '英語カードの生成に失敗しました。'
       );
       throw error;
@@ -161,7 +181,7 @@ export default {
     if (cardDrafts.length === 0) {
       await markGenerationFailed(
         generationContext,
-        claimedDiaryEntry.id,
+        claimedPracticeGeneration.id,
         '英語カードを作成できませんでした。'
       );
       return errorResponse('英語カードを作成できませんでした。', 502);
@@ -173,20 +193,19 @@ export default {
         source,
         raw_transcript_text: rawTranscriptText,
         body_text: bodyText,
-        practice_generation_error: null,
       })
       .eq('id', claimedDiaryEntry.id)
       .select(diaryEntrySelect)
       .single();
 
     if (diaryError) {
-      await markGenerationFailed(generationContext, claimedDiaryEntry.id, diaryError.message);
+      await markGenerationFailed(generationContext, claimedPracticeGeneration.id, diaryError.message);
       return errorResponse(diaryError.message, 500);
     }
 
     const cardRows = cardDrafts.map((card) => ({
       user_id: userId,
-      diary_entry_id: diaryEntry.id,
+      practice_generation_id: claimedPracticeGeneration.id,
       sort_order: card.sort_order,
       japanese: card.japanese,
       english: card.english,
@@ -199,43 +218,102 @@ export default {
       .order('sort_order', { ascending: true });
 
     if (cardsError) {
-      await markGenerationFailed(generationContext, claimedDiaryEntry.id, cardsError.message);
+      await markGenerationFailed(generationContext, claimedPracticeGeneration.id, cardsError.message);
       return errorResponse(cardsError.message, 500);
     }
 
     if (!cards?.length) {
       await markGenerationFailed(
         generationContext,
-        claimedDiaryEntry.id,
+        claimedPracticeGeneration.id,
         '英語カードを保存できませんでした。'
       );
       return errorResponse('英語カードを保存できませんでした。', 500);
     }
 
-    const { data: completedDiaryEntry, error: completeError } = await generationContext.supabase
-      .from('diary_entries')
-      .update({
-        practice_generation_status: 'completed',
-        practice_generation_error: null,
-      })
-      .eq('id', claimedDiaryEntry.id)
-      .select(diaryEntrySelect)
-      .single();
+    const { data: completedPracticeGeneration, error: completeError } =
+      await generationContext.supabase
+        .from('practice_generations')
+        .update({
+          practice_generation_status: 'completed',
+          practice_generation_error: null,
+        })
+        .eq('id', claimedPracticeGeneration.id)
+        .select(practiceGenerationSelect)
+        .single();
 
     if (completeError) {
-      await markGenerationFailed(generationContext, claimedDiaryEntry.id, completeError.message);
+      await markGenerationFailed(generationContext, claimedPracticeGeneration.id, completeError.message);
       return errorResponse(completeError.message, 500);
     }
 
     return jsonResponse({
-      diaryEntry: toPublicDiaryEntry(completedDiaryEntry),
+      diaryEntry: toPublicDiaryEntry(diaryEntry),
+      practiceGeneration: toPublicPracticeGeneration(completedPracticeGeneration),
       cards,
       reused: false,
     });
   },
 };
 
-async function claimDiaryEntryForGeneration(
+async function claimGeneration(
+  context: { supabase: any },
+  {
+    userId,
+    source,
+    generationMode,
+    rawTranscriptText,
+    cleanedText,
+    contentHash,
+  }: {
+    userId: string;
+    source: 'text' | 'voice';
+    generationMode: GenerationMode;
+    rawTranscriptText: string;
+    cleanedText: string;
+    contentHash: string;
+  }
+): Promise<GenerationClaim> {
+  const diaryEntryClaim = await getOrCreateDiaryEntry(context, {
+    userId,
+    source,
+    rawTranscriptText,
+    cleanedText,
+    contentHash,
+  });
+
+  if (diaryEntryClaim.type === 'error') {
+    return diaryEntryClaim;
+  }
+
+  const diaryEntry = diaryEntryClaim.diaryEntry;
+  const practiceGenerationClaim = await claimPracticeGeneration(context, {
+    userId,
+    diaryEntry,
+    generationMode,
+  });
+
+  if (practiceGenerationClaim.type === 'claimed') {
+    return {
+      type: 'claimed',
+      diaryEntry,
+      practiceGeneration: practiceGenerationClaim.practiceGeneration,
+    };
+  }
+
+  if (practiceGenerationClaim.type === 'completed') {
+    return {
+      type: 'completed',
+      diaryEntry,
+      practiceGeneration: practiceGenerationClaim.practiceGeneration,
+      cards: practiceGenerationClaim.cards,
+    };
+  }
+
+  return practiceGenerationClaim;
+}
+
+async function getOrCreateDiaryEntry(
   context: { supabase: any },
   {
     userId,
@@ -259,14 +337,68 @@ async function claimDiaryEntryForGeneration(
       raw_transcript_text: rawTranscriptText,
       body_text: cleanedText,
       content_hash: contentHash,
-      practice_generation_status: 'processing',
-      practice_generation_error: null,
     })
     .select(diaryEntrySelect)
     .single();
 
   if (!error && diaryEntry) {
-    return { type: 'claimed' as const, diaryEntry: diaryEntry as DiaryEntryRow };
+    return { type: 'created' as const, diaryEntry: diaryEntry as DiaryEntryRow };
+  }
+
+  if (!isUniqueConstraintError(error)) {
+    return {
+      type: 'error' as const,
+      status: 500,
+      message: error?.message ?? '日記の作成を開始できませんでした。',
+    };
+  }
+
+  const existingDiaryEntry = await fetchDiaryEntryByHash(context, userId, contentHash);
+
+  if (existingDiaryEntry.type === 'found') {
+    return { type: 'existing' as const, diaryEntry: existingDiaryEntry.diaryEntry };
+  }
+
+  if (existingDiaryEntry.type === 'error') {
+    return existingDiaryEntry;
+  }
+
+  return {
+    type: 'error' as const,
+    status: 409,
+    message: 'この日記は作成中です。少し待ってからもう一度確認してください。',
+  };
+}
+
+async function claimPracticeGeneration(
+  context: { supabase: any },
+  {
+    userId,
+    diaryEntry,
+    generationMode,
+  }: {
+    userId: string;
+    diaryEntry: DiaryEntryRow;
+    generationMode: GenerationMode;
+  }
+) {
+  const { data: practiceGeneration, error } = await context.supabase
+    .from('practice_generations')
+    .insert({
+      user_id: userId,
+      diary_entry_id: diaryEntry.id,
+      generation_mode: generationMode,
+      practice_generation_status: 'processing',
+      practice_generation_error: null,
+    })
+    .select(practiceGenerationSelect)
+    .single();
+
+  if (!error && practiceGeneration) {
+    return {
+      type: 'claimed' as const,
+      practiceGeneration: practiceGeneration as PracticeGenerationRow,
+    };
   }
 
   if (!isUniqueConstraintError(error)) {
@@ -277,22 +409,21 @@ async function claimDiaryEntryForGeneration(
     };
   }
 
-  const existingPractice = await waitForExistingPractice(context, userId, contentHash);
+  const existingPractice = await waitForExistingPractice(context, diaryEntry.id, generationMode);
 
-  if (existingPractice.type === 'completed' || existingPractice.type === 'busy') {
-    return existingPractice;
-  }
-
-  if (existingPractice.type === 'error') {
+  if (
+    existingPractice.type === 'completed' ||
+    existingPractice.type === 'busy' ||
+    existingPractice.type === 'error'
+  ) {
     return existingPractice;
   }
 
   if (existingPractice.type === 'failed' || existingPractice.type === 'stale') {
-    const retryClaim = await claimExistingDiaryEntryForRetry(context, existingPractice.diaryEntry, {
-      source,
-      rawTranscriptText,
-      cleanedText,
-    });
+    const retryClaim = await claimExistingPracticeGenerationForRetry(
+      context,
+      existingPractice.practiceGeneration
+    );
 
     if (retryClaim.type === 'claimed') {
       return retryClaim;
@@ -308,22 +439,29 @@ async function claimDiaryEntryForGeneration(
 
 async function waitForExistingPractice(
   context: { supabase: any },
-  userId: string,
-  contentHash: string
+  diaryEntryId: string,
+  generationMode: GenerationMode
 ) {
   for (let attempt = 0; attempt < existingGenerationWaitAttempts; attempt += 1) {
-    const existingDiaryEntry = await fetchDiaryEntryByHash(context, userId, contentHash);
+    const existingPracticeGeneration = await fetchPracticeGeneration(
+      context,
+      diaryEntryId,
+      generationMode
+    );
 
-    if (existingDiaryEntry.type === 'error') {
-      return existingDiaryEntry;
+    if (existingPracticeGeneration.type === 'error') {
+      return existingPracticeGeneration;
     }
 
-    if (existingDiaryEntry.type === 'notFound') {
+    if (existingPracticeGeneration.type === 'notFound') {
       return { type: 'busy' as const };
     }
 
-    if (existingDiaryEntry.diaryEntry.practice_generation_status === 'completed') {
-      const cards = await fetchDiaryEntryCards(context, existingDiaryEntry.diaryEntry.id);
+    if (existingPracticeGeneration.practiceGeneration.practice_generation_status === 'completed') {
+      const cards = await fetchPracticeGenerationCards(
+        context,
+        existingPracticeGeneration.practiceGeneration.id
+      );
 
       if (cards.type === 'error') {
         return cards;
@@ -332,26 +470,26 @@ async function waitForExistingPractice(
       if (cards.cards.length > 0) {
         return {
           type: 'completed' as const,
-          diaryEntry: existingDiaryEntry.diaryEntry,
+          practiceGeneration: existingPracticeGeneration.practiceGeneration,
           cards: cards.cards,
         };
       }
     }
 
-    if (existingDiaryEntry.diaryEntry.practice_generation_status === 'failed') {
+    if (existingPracticeGeneration.practiceGeneration.practice_generation_status === 'failed') {
       return {
         type: 'failed' as const,
-        diaryEntry: existingDiaryEntry.diaryEntry,
+        practiceGeneration: existingPracticeGeneration.practiceGeneration,
       };
     }
 
     if (
-      existingDiaryEntry.diaryEntry.practice_generation_status === 'processing' &&
-      isProcessingStale(existingDiaryEntry.diaryEntry)
+      existingPracticeGeneration.practiceGeneration.practice_generation_status === 'processing' &&
+      isProcessingStale(existingPracticeGeneration.practiceGeneration)
     ) {
       return {
         type: 'stale' as const,
-        diaryEntry: existingDiaryEntry.diaryEntry,
+        practiceGeneration: existingPracticeGeneration.practiceGeneration,
       };
     }
 
@@ -380,11 +518,37 @@ async function fetchDiaryEntryByHash(context: { supabase: any }, userId: string,
   return { type: 'found' as const, diaryEntry: data as DiaryEntryRow };
 }
 
-async function fetchDiaryEntryCards(context: { supabase: any }, diaryEntryId: string) {
+async function fetchPracticeGeneration(
+  context: { supabase: any },
+  diaryEntryId: string,
+  generationMode: GenerationMode
+) {
+  const { data, error } = await context.supabase
+    .from('practice_generations')
+    .select(practiceGenerationSelect)
+    .eq('diary_entry_id', diaryEntryId)
+    .eq('generation_mode', generationMode)
+    .maybeSingle();
+
+  if (error) {
+    return { type: 'error' as const, status: 500, message: error.message };
+  }
+
+  if (!data) {
+    return { type: 'notFound' as const };
+  }
+
+  return { type: 'found' as const, practiceGeneration: data as PracticeGenerationRow };
+}
+
+async function fetchPracticeGenerationCards(
+  context: { supabase: any },
+  practiceGenerationId: string
+) {
   const { data, error } = await context.supabase
     .from('translation_cards')
     .select(translationCardSelect)
-    .eq('diary_entry_id', diaryEntryId)
+    .eq('practice_generation_id', practiceGenerationId)
     .order('sort_order', { ascending: true });
 
   if (error) {
@@ -394,31 +558,19 @@ async function fetchDiaryEntryCards(context: { supabase: any }, diaryEntryId: st
   return { type: 'cards' as const, cards: data ?? [] };
 }
 
-async function claimExistingDiaryEntryForRetry(
+async function claimExistingPracticeGenerationForRetry(
   context: { supabase: any },
-  diaryEntry: DiaryEntryRow,
-  {
-    source,
-    rawTranscriptText,
-    cleanedText,
-  }: {
-    source: 'text' | 'voice';
-    rawTranscriptText: string;
-    cleanedText: string;
-  }
+  practiceGeneration: PracticeGenerationRow
 ) {
   const { data, error } = await context.supabase
-    .from('diary_entries')
+    .from('practice_generations')
     .update({
-      source,
-      raw_transcript_text: rawTranscriptText,
-      body_text: cleanedText,
       practice_generation_status: 'processing',
       practice_generation_error: null,
     })
-    .eq('id', diaryEntry.id)
-    .eq('practice_generation_status', diaryEntry.practice_generation_status)
-    .select(diaryEntrySelect)
+    .eq('id', practiceGeneration.id)
+    .eq('practice_generation_status', practiceGeneration.practice_generation_status)
+    .select(practiceGenerationSelect)
     .maybeSingle();
 
   if (error) {
@@ -432,24 +584,28 @@ async function claimExistingDiaryEntryForRetry(
   const { error: deleteError } = await context.supabase
     .from('translation_cards')
     .delete()
-    .eq('diary_entry_id', diaryEntry.id);
+    .eq('practice_generation_id', practiceGeneration.id);
 
   if (deleteError) {
-    await markGenerationFailed(context, diaryEntry.id, deleteError.message);
+    await markGenerationFailed(context, practiceGeneration.id, deleteError.message);
     return { type: 'error' as const, status: 500, message: deleteError.message };
   }
 
-  return { type: 'claimed' as const, diaryEntry: data as DiaryEntryRow };
+  return { type: 'claimed' as const, practiceGeneration: data as PracticeGenerationRow };
 }
 
-async function markGenerationFailed(context: { supabase: any }, diaryEntryId: string, message: string) {
+async function markGenerationFailed(
+  context: { supabase: any },
+  practiceGenerationId: string,
+  message: string
+) {
   await context.supabase
-    .from('diary_entries')
+    .from('practice_generations')
     .update({
       practice_generation_status: 'failed',
       practice_generation_error: message,
     })
-    .eq('id', diaryEntryId);
+    .eq('id', practiceGenerationId);
 }
 
 async function createContentHash(value: string) {
@@ -468,13 +624,53 @@ function isUniqueConstraintError(error: { code?: string } | null) {
   return error?.code === '23505';
 }
 
-function isProcessingStale(diaryEntry: DiaryEntryRow) {
-  const updatedAtMs = Date.parse(diaryEntry.updated_at);
+function isProcessingStale(practiceGeneration: PracticeGenerationRow) {
+  const updatedAtMs = Date.parse(practiceGeneration.updated_at);
   return Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs > processingRetryTimeoutMs;
 }
 
 function delay(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function parseGenerationMode(value: unknown): GenerationMode {
+  return value === 'compact' ? 'compact' : 'natural';
+}
+
+function createPracticeInstructions(generationMode: GenerationMode) {
+  const commonInstructions = [
+    'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
+    '入力は日本語の文字起こし、またはそれを軽く整えた文章です。',
+    'diaryText は日記タブにそのまま全文表示する日本語本文です。',
+    'diaryText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
+    'diaryText は話者の事実と温度感を保ったまま、読める日記文として句読点と文の流れだけを整えてください。',
+    '意味を足さないでください。削りすぎないでください。短い入力は短い日記文のままで構いません。',
+    'そのうえで、英語ならどこまでを一文にするのが自然かを逆算してください。',
+    '日本語の句点や話し言葉の切れ目に引きずられず、英語ネイティブが自然に言う一文ごとのカードに分けてください。',
+    '各カードは japanese と english の一対一にしてください。',
+    'japanese は、その english に対応する日本語の意味の塊だけを入れてください。文の途中で不自然に切らないでください。',
+    'english は直訳や教材っぽい説明文にせず、ネイティブが日常会話で自然に言う一文にしてください。',
+    'カード数に上限はありません。無理に増やさず、自然に分けられる分だけ返してください。',
+  ];
+
+  const modeInstructions =
+    generationMode === 'compact'
+      ? [
+          '現在の生成モードは「短さ優先」です。',
+          'フラッシュカードとして覚えやすい短さを優先し、1カード1アイデアを基本にしてください。',
+          'and, but, so などの接続詞で自然に分けられる英語文は、一文に詰め込まずカードを分けてください。',
+          'because, while, although, if などで長い複文になる場合も、意味が自然に独立するなら分割してください。',
+          '分割後の各 english は、文の断片ではなく、それぞれ単独で自然に言える一文にしてください。',
+          '目安は1カード12〜16語程度です。ただし自然さや意味の欠落防止が必要なら少し超えて構いません。',
+        ]
+      : [
+          '現在の生成モードは「自然さ優先」です。',
+          '自然な話し言葉としての英語を優先してください。',
+          '1枚が少し長くなっても、意味の流れとネイティブらしさを崩さないでください。',
+          'and, but, so などでつながる一文が自然なら、無理に分割しないでください。',
+        ];
+
+  return [...commonInstructions, ...modeInstructions].join('\n');
 }
 
 function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
@@ -485,6 +681,16 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     raw_transcript_text: diaryEntry.raw_transcript_text,
     body_text: diaryEntry.body_text,
     created_at: diaryEntry.created_at,
+  };
+}
+
+function toPublicPracticeGeneration(practiceGeneration: PracticeGenerationRow) {
+  return {
+    id: practiceGeneration.id,
+    diary_entry_id: practiceGeneration.diary_entry_id,
+    generation_mode: practiceGeneration.generation_mode,
+    practice_generation_status: practiceGeneration.practice_generation_status,
+    created_at: practiceGeneration.created_at,
   };
 }
 

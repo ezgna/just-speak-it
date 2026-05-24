@@ -1,5 +1,16 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { useEffect } from 'react';
 import { View, type StyleProp, type ViewStyle } from 'react-native';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { ThemedText } from '@/components/themed-text';
 import {
@@ -53,6 +64,7 @@ export function GlideButton({
   badge,
   icon,
   iconSide = 'right',
+  busy = false,
   size = 'large',
   fullWidth = true,
   direction = 'diagonal',
@@ -69,6 +81,7 @@ export function GlideButton({
   badge?: string;
   icon?: SymbolViewProps['name'];
   iconSide?: 'left' | 'right';
+  busy?: boolean;
   size?: GlideButtonSize;
   fullWidth?: boolean;
   direction?: FoundationSurfaceDirection;
@@ -84,6 +97,16 @@ export function GlideButton({
   const compact = size === 'compact';
   const extraLarge = size === 'extraLarge';
   const hasCaption = Boolean(caption);
+  const sideAccessory = busy ? (
+    <GlideButtonBusyIndicator color={toneStyle.textColor} size={size} />
+  ) : icon ? (
+    <SymbolView
+      name={icon}
+      size={sizeMetrics.iconSize}
+      tintColor={toneStyle.textColor}
+      fallback={<ThemedText style={{ color: toneStyle.textColor }}>{'>'}</ThemedText>}
+    />
+  ) : null;
 
   return (
     <GlideFrame
@@ -98,6 +121,7 @@ export function GlideButton({
       holdPressOut={holdPressOut}
       accessibilityLabel={accessibilityLabel ?? (badge ? `${label} ${badge}` : label)}
       accessibilityRole="button"
+      accessibilityState={{ disabled, busy }}
       style={hasCaption && size === 'large' ? { paddingVertical: 11 } : undefined}>
       <View
         style={{
@@ -106,14 +130,7 @@ export function GlideButton({
           justifyContent: compact ? 'center' : 'space-between',
           gap: 10,
         }}>
-        {icon && iconSide === 'left' ? (
-          <SymbolView
-            name={icon}
-            size={sizeMetrics.iconSize}
-            tintColor={toneStyle.textColor}
-            fallback={<ThemedText style={{ color: toneStyle.textColor }}>{'>'}</ThemedText>}
-          />
-        ) : null}
+        {sideAccessory && iconSide === 'left' ? sideAccessory : null}
 
         <View
           style={{
@@ -179,15 +196,112 @@ export function GlideButton({
           </View>
         </View>
 
-        {icon && iconSide === 'right' ? (
-          <SymbolView
-            name={icon}
-            size={sizeMetrics.iconSize}
-            tintColor={toneStyle.textColor}
-            fallback={<ThemedText style={{ color: toneStyle.textColor }}>{'>'}</ThemedText>}
-          />
-        ) : null}
+        {sideAccessory && iconSide === 'right' ? sideAccessory : null}
       </View>
     </GlideFrame>
+  );
+}
+
+function GlideButtonBusyIndicator({
+  color,
+  size,
+}: {
+  color: string;
+  size: GlideButtonSize;
+}) {
+  const compact = size === 'compact';
+  const dotSize = compact ? 5 : size === 'medium' ? 6 : 7;
+  const dotGap = compact ? 3 : 4;
+  const paddingHorizontal = compact ? 0 : 7;
+  const travel = compact ? -2 : -3;
+
+  return (
+    <View
+      accessible={false}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: dotGap,
+        minWidth: compact ? 26 : 39,
+        height: compact ? 14 : 24,
+        borderWidth: compact ? 0 : 2,
+        borderColor: color,
+        borderRadius: 999,
+        paddingHorizontal,
+        backgroundColor: compact ? 'transparent' : getGlideRgba(color, 0.06),
+      }}>
+      {[0, 1, 2].map((index) => (
+        <GlideButtonBusyDot
+          key={index}
+          color={color}
+          delay={index * 130}
+          dotSize={dotSize}
+          travel={travel}
+        />
+      ))}
+    </View>
+  );
+}
+
+function GlideButtonBusyDot({
+  color,
+  delay,
+  dotSize,
+  travel,
+}: {
+  color: string;
+  delay: number;
+  dotSize: number;
+  travel: number;
+}) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, {
+            duration: 260,
+            easing: Easing.out(Easing.quad),
+          }),
+          withTiming(0, {
+            duration: 260,
+            easing: Easing.in(Easing.quad),
+          }),
+          withDelay(420, withTiming(0, { duration: 1 }))
+        ),
+        -1,
+        false
+      )
+    );
+
+    return () => {
+      cancelAnimation(progress);
+      progress.value = 0;
+    };
+  }, [delay, progress]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: 0.38 + progress.value * 0.62,
+    transform: [
+      { translateY: progress.value * travel },
+      { scale: 0.84 + progress.value * 0.16 },
+    ],
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width: dotSize,
+          height: dotSize,
+          borderRadius: dotSize / 2,
+          backgroundColor: color,
+        },
+        animatedStyle,
+      ]}
+    />
   );
 }

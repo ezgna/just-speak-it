@@ -5,6 +5,7 @@ export type PracticeCard = TranslationCard & {
   diaryText: string;
   diaryExcerpt: string;
   diaryCreatedAt: string;
+  generationMode: TranslationCardGroup['generationMode'];
   source: TranslationCardGroup['source'];
 };
 
@@ -21,6 +22,7 @@ export function flattenTranslationCardGroups(groups: TranslationCardGroup[]): Pr
       diaryText: group.diaryText,
       diaryExcerpt: group.diaryExcerpt,
       diaryCreatedAt: group.createdAt,
+      generationMode: group.generationMode,
       source: group.source,
     }))
   );

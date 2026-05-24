@@ -11,8 +11,6 @@ export type Database = {
           raw_transcript_text: string;
           body_text: string;
           content_hash: string;
-          practice_generation_status: 'processing' | 'completed' | 'failed';
-          practice_generation_error: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -23,8 +21,6 @@ export type Database = {
           raw_transcript_text: string;
           body_text: string;
           content_hash: string;
-          practice_generation_status?: 'processing' | 'completed' | 'failed';
-          practice_generation_error?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -35,6 +31,36 @@ export type Database = {
           raw_transcript_text?: string;
           body_text?: string;
           content_hash?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      practice_generations: {
+        Row: {
+          id: string;
+          user_id: string;
+          diary_entry_id: string;
+          generation_mode: 'natural' | 'compact';
+          practice_generation_status: 'processing' | 'completed' | 'failed';
+          practice_generation_error: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          diary_entry_id: string;
+          generation_mode?: 'natural' | 'compact';
+          practice_generation_status?: 'processing' | 'completed' | 'failed';
+          practice_generation_error?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          diary_entry_id?: string;
+          generation_mode?: 'natural' | 'compact';
           practice_generation_status?: 'processing' | 'completed' | 'failed';
           practice_generation_error?: string | null;
           created_at?: string;
@@ -45,7 +71,7 @@ export type Database = {
         Row: {
           id: string;
           user_id: string;
-          diary_entry_id: string;
+          practice_generation_id: string;
           sort_order: number;
           japanese: string;
           english: string;
@@ -55,7 +81,7 @@ export type Database = {
         Insert: {
           id?: string;
           user_id: string;
-          diary_entry_id: string;
+          practice_generation_id: string;
           sort_order?: number;
           japanese: string;
           english: string;
@@ -65,7 +91,7 @@ export type Database = {
         Update: {
           id?: string;
           user_id?: string;
-          diary_entry_id?: string;
+          practice_generation_id?: string;
           sort_order?: number;
           japanese?: string;
           english?: string;

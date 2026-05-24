@@ -1,9 +1,10 @@
 import { ensureAnonymousSession } from '@/lib/backend/auth';
+import { type GenerationMode } from '@/lib/generation-mode';
 import { requireSupabaseClient } from '@/lib/supabase/client';
 
 export type TranslationCard = {
   id: string;
-  diaryEntryId: string;
+  practiceGenerationId: string;
   sortOrder: number;
   japanese: string;
   english: string;
@@ -12,6 +13,8 @@ export type TranslationCard = {
 
 export type TranslationCardGroup = {
   diaryEntryId: string;
+  generationMode: GenerationMode;
+  practiceGenerationId: string;
   source: 'text' | 'voice';
   diaryText: string;
   diaryExcerpt: string;
@@ -21,7 +24,7 @@ export type TranslationCardGroup = {
 
 type TranslationCardRow = {
   id: string;
-  diary_entry_id: string;
+  practice_generation_id: string;
   sort_order: number;
   japanese: string;
   english: string;
@@ -51,8 +54,16 @@ type DiaryEntryGroupRow = {
   created_at: string;
 };
 
+type PracticeGenerationRow = {
+  id: string;
+  diary_entry_id: string;
+  generation_mode: GenerationMode;
+  created_at: string;
+};
+
 export type GeneratePracticeParams = {
   diaryText: string;
+  generationMode?: GenerationMode;
   source: 'text' | 'voice';
   rawTranscriptText?: string;
   cleanedText?: string;
@@ -72,6 +83,7 @@ export type GeneratePracticeResponse = {
 
 export async function generatePracticeFromDiary({
   diaryText,
+  generationMode = 'natural',
   source,
   rawTranscriptText,
   cleanedText,
@@ -84,6 +96,7 @@ export async function generatePracticeFromDiary({
     {
       body: {
         diaryText,
+        generationMode,
         source,
         rawTranscriptText,
         cleanedText,
@@ -103,7 +116,7 @@ export async function generatePracticeFromDiary({
     diaryEntry: data.diaryEntry,
     cards: data.cards.map((card) => ({
       id: card.id,
-      diaryEntryId: card.diary_entry_id,
+      practiceGenerationId: card.practice_generation_id,
       sortOrder: card.sort_order,
       japanese: card.japanese,
       english: card.english,
@@ -138,11 +151,31 @@ export async function listTranslationCardGroups() {
   await ensureAnonymousSession();
 
   const supabase = requireSupabaseClient();
+  const { data: generationRows, error: generationsError } = await supabase
+    .from('practice_generations')
+    .select('id, diary_entry_id, generation_mode, created_at')
+    .eq('practice_generation_status', 'completed')
+    .order('created_at', { ascending: false });
+
+  if (generationsError) {
+    throw generationsError;
+  }
+
+  const practiceGenerations = (generationRows ?? []) as PracticeGenerationRow[];
+
+  if (practiceGenerations.length === 0) {
+    return [];
+  }
+
+  const diaryEntryIds = Array.from(
+    new Set(practiceGenerations.map((generation) => generation.diary_entry_id))
+  );
+  const practiceGenerationIds = practiceGenerations.map((generation) => generation.id);
+
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
     .select('id, source, body_text, created_at')
-    .eq('practice_generation_status', 'completed')
-    .order('created_at', { ascending: false });
+    .in('id', diaryEntryIds);
 
   if (entriesError) {
     throw entriesError;
@@ -150,32 +183,48 @@ export async function listTranslationCardGroups() {
 
   const { data, error } = await supabase
     .from('translation_cards')
-    .select('id, diary_entry_id, sort_order, japanese, english, created_at')
+    .select('id, practice_generation_id, sort_order, japanese, english, created_at')
+    .in('practice_generation_id', practiceGenerationIds)
     .order('sort_order', { ascending: true });
 
   if (error) {
     throw error;
   }
 
-  const cardsByDiaryId = new Map<string, TranslationCard[]>();
+  const diaryEntriesById = new Map(
+    ((entries ?? []) as DiaryEntryGroupRow[]).map((entry) => [entry.id, entry])
+  );
+  const cardsByPracticeGenerationId = new Map<string, TranslationCard[]>();
 
   for (const card of data ?? []) {
     const mappedCard = mapTranslationCard(card);
-    const diaryCards = cardsByDiaryId.get(mappedCard.diaryEntryId) ?? [];
-    diaryCards.push(mappedCard);
-    cardsByDiaryId.set(mappedCard.diaryEntryId, diaryCards);
+    const generationCards =
+      cardsByPracticeGenerationId.get(mappedCard.practiceGenerationId) ?? [];
+    generationCards.push(mappedCard);
+    cardsByPracticeGenerationId.set(mappedCard.practiceGenerationId, generationCards);
   }
 
-  return ((entries ?? []) as DiaryEntryGroupRow[])
-    .map((entry) => ({
-      diaryEntryId: entry.id,
-      source: entry.source,
-      diaryText: normalizeDiaryBodyText(entry.body_text),
-      diaryExcerpt: createDiaryExcerpt(entry.body_text),
-      createdAt: entry.created_at,
-      cards: cardsByDiaryId.get(entry.id) ?? [],
-    }))
-    .filter((group) => group.cards.length > 0);
+  return practiceGenerations
+    .map((generation) => {
+      const entry = diaryEntriesById.get(generation.diary_entry_id);
+      const cards = cardsByPracticeGenerationId.get(generation.id) ?? [];
+
+      if (!entry || cards.length === 0) {
+        return null;
+      }
+
+      return {
+        diaryEntryId: entry.id,
+        generationMode: generation.generation_mode,
+        practiceGenerationId: generation.id,
+        source: entry.source,
+        diaryText: normalizeDiaryBodyText(entry.body_text),
+        diaryExcerpt: createDiaryExcerpt(entry.body_text),
+        createdAt: entry.created_at,
+        cards,
+      };
+    })
+    .filter((group): group is TranslationCardGroup => group !== null);
 }
 
 async function normalizeFunctionError(error: unknown) {
@@ -224,7 +273,7 @@ function parseJson<T>(value: string): T | null {
 function mapTranslationCard(card: TranslationCardRow): TranslationCard {
   return {
     id: card.id,
-    diaryEntryId: card.diary_entry_id,
+    practiceGenerationId: card.practice_generation_id,
     sortOrder: card.sort_order,
     japanese: card.japanese,
     english: card.english,

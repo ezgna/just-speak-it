@@ -1,9 +1,12 @@
+import { router } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { GenerationModeSelector } from '@/components/generation-mode-selector';
 import { useDailyPalette } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
 import { ThemePreferenceSelector } from '@/components/theme-preference-selector';
+import { GlideButton } from '@/components/ui/glide-button';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 
 export default function SettingsScreen() {
@@ -31,6 +34,17 @@ export default function SettingsScreen() {
         </View>
 
         <ThemePreferenceSelector />
+        <GenerationModeSelector />
+
+        {__DEV__ ? (
+          <GlideButton
+            label="実験室"
+            caption="design lab"
+            icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+            tone="mint"
+            onPress={() => router.push('/design-lab')}
+          />
+        ) : null}
       </View>
     </ScrollView>
   );

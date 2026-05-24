@@ -5,37 +5,31 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
-import { router } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { useRef, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Keyboard, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ActionButton, useDailyPalette } from '@/components/daily-to-english-ui';
+import { useDailyPalette } from '@/components/daily-to-english-ui';
 import { ThemedText } from '@/components/themed-text';
-import { GlideFrame, GlideTones } from '@/components/ui/glide-frame';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideTextInput } from '@/components/ui/glide-text-input';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import {
-  generatePracticeFromDiary,
-  type TranslationCard,
-} from '@/lib/backend/practice';
+import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { useGenerationMode } from '@/hooks/use-generation-mode';
+import { generatePracticeFromDiary } from '@/lib/backend/practice';
 import { setHapticsAllowedDuringRecording } from '@/lib/audio-session-haptics';
 import { notifyPracticeChanged } from '@/lib/practice-refresh';
 import { transcribeRecording } from '@/lib/backend/transcription';
 
 type DiaryDraftSource = 'text' | 'voice';
-type RecordingStartMode = 'new' | 'retry';
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const palette = useDailyPalette();
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(audioRecorder);
+  const { generationMode } = useGenerationMode();
   const [diaryDraftText, setDiaryDraftText] = useState('');
   const [diaryDraftSource, setDiaryDraftSource] = useState<DiaryDraftSource>('text');
-  const [recordingStartMode, setRecordingStartMode] = useState<RecordingStartMode>('new');
   const [isRecordingBusy, setIsRecordingBusy] = useState(false);
   const [recordingIntentActive, setRecordingIntentActive] = useState(false);
   const [isStoppingRecording, setIsStoppingRecording] = useState(false);
@@ -46,7 +40,7 @@ export default function HomeScreen() {
   const [rawTranscriptText, setRawTranscriptText] = useState<string | null>(null);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [cards, setCards] = useState<TranslationCard[]>([]);
+  const [hasSavedCurrentDraft, setHasSavedCurrentDraft] = useState(false);
   const generationInFlightRef = useRef(false);
 
   const isRecordingButtonActive = recorderState.isRecording || isStoppingRecording;
@@ -54,26 +48,21 @@ export default function HomeScreen() {
   const recordingButtonDurationMillis = recorderState.isRecording
     ? recorderState.durationMillis
     : recordingStopDurationMillis;
+  const recordingButtonDurationLabel = formatDuration(recordingButtonDurationMillis);
   const isWorking = isRecordingBusy || isTranscribing || isGeneratingCards;
   const isRecordingButtonPressed =
     writingPressHeld || isTranscribing || isGeneratingCards;
   const isRecordingButtonDisabled =
     isWorking || (recordingIntentActive && !recorderState.isRecording);
-  const hasCards = cards.length > 0;
   const isDraftInputEditable =
-    !recorderState.isRecording && !isWorking && !hasCards;
+    !recorderState.isRecording && !isWorking;
   const hasDraftText = diaryDraftText.trim().length > 0;
-  const isRetryDraft = diaryDraftSource === 'voice' && hasDraftText;
-  const isRecordingStartPending = recordingIntentActive && !recorderState.isRecording;
-  const shouldShowRetryAction =
-    isRetryDraft || (isRecordingStartPending && recordingStartMode === 'retry');
-  const isGenerateCardsButtonDisabled =
-    !hasDraftText || hasCards || recorderState.isRecording || isWorking;
+  const shouldShowMakeCardsAction =
+    hasDraftText && !hasSavedCurrentDraft && !isRecordingButtonActive && !isWritingButtonActive;
 
-  async function startRecording(startMode: RecordingStartMode) {
+  async function startRecording() {
     setIsRecordingBusy(true);
     setRecordingIntentActive(true);
-    setRecordingStartMode(startMode);
     setIsStoppingRecording(false);
     setRecordingStopDurationMillis(0);
     setTranscriptionError(null);
@@ -83,7 +72,6 @@ export default function HomeScreen() {
       const permission = await AudioModule.requestRecordingPermissionsAsync();
       if (!permission.granted) {
         setRecordingIntentActive(false);
-        setRecordingStartMode('new');
         Alert.alert('録音できません', 'マイク権限がないため録音できません。');
         return;
       }
@@ -93,16 +81,15 @@ export default function HomeScreen() {
         playsInSilentMode: true,
       });
       await audioRecorder.prepareToRecordAsync();
-      await setHapticsAllowedDuringRecording(true);
+      await setRecordingHapticsAllowed(true);
       audioRecorder.record();
       setDiaryDraftText('');
       setDiaryDraftSource('voice');
       setRawTranscriptText(null);
-      setCards([]);
+      setHasSavedCurrentDraft(false);
     } catch (error) {
       setRecordingIntentActive(false);
-      setRecordingStartMode('new');
-      void setHapticsAllowedDuringRecording(false).catch(() => undefined);
+      void setRecordingHapticsAllowed(false);
       Alert.alert(
         '録音できません',
         error instanceof Error ? error.message : '録音の開始に失敗しました。'
@@ -128,7 +115,7 @@ export default function HomeScreen() {
         allowsRecording: false,
         playsInSilentMode: true,
       });
-      await setHapticsAllowedDuringRecording(false);
+      await setRecordingHapticsAllowed(false);
 
       if (!recordingUri) {
         throw new Error('録音ファイルを読み込めませんでした。もう一度録音してください。');
@@ -158,9 +145,10 @@ export default function HomeScreen() {
 
     try {
       const transcript = await transcribeRecording(recordingUri);
-      setRawTranscriptText(transcript.rawText);
-      setDiaryDraftText(transcript.cleanedText);
-      setDiaryDraftSource('voice');
+      const cleanedText = transcript.cleanedText.trim();
+      setRawTranscriptText(cleanedText ? transcript.rawText : null);
+      setDiaryDraftText(cleanedText);
+      setDiaryDraftSource(cleanedText ? 'voice' : 'text');
     } catch (error) {
       setTranscriptionError(
         error instanceof Error ? error.message : '音声の読み取りに失敗しました。'
@@ -174,24 +162,30 @@ export default function HomeScreen() {
   async function handleGenerateCards() {
     const diaryText = diaryDraftText.trim();
 
-    if (!diaryText || isGeneratingCards || generationInFlightRef.current || hasCards) {
+    if (
+      !diaryText ||
+      isGeneratingCards ||
+      generationInFlightRef.current ||
+      hasSavedCurrentDraft
+    ) {
       return;
     }
 
     generationInFlightRef.current = true;
     setIsGeneratingCards(true);
     setGenerationError(null);
-    setCards([]);
+    setHasSavedCurrentDraft(false);
 
     try {
-      const result = await generatePracticeFromDiary({
+      await generatePracticeFromDiary({
         diaryText,
         source: diaryDraftSource,
         cleanedText: diaryText,
         rawTranscriptText:
           diaryDraftSource === 'voice' ? rawTranscriptText ?? diaryText : diaryText,
+        generationMode,
       });
-      setCards(result.cards);
+      setHasSavedCurrentDraft(true);
       notifyPracticeChanged();
     } catch (error) {
       setGenerationError(
@@ -203,14 +197,21 @@ export default function HomeScreen() {
     }
   }
 
-  async function handleRecordingPress() {
+  async function handlePrimaryActionPress() {
+    Keyboard.dismiss();
+
     if (recorderState.isRecording) {
       setWritingPressHeld(true);
       await stopRecording();
       return;
     }
 
-    await startRecording(isRetryDraft ? 'retry' : 'new');
+    if (hasDraftText && !hasSavedCurrentDraft) {
+      await handleGenerateCards();
+      return;
+    }
+
+    await startRecording();
   }
 
   function handleDraftTextChange(nextText: string) {
@@ -222,7 +223,7 @@ export default function HomeScreen() {
     setDiaryDraftText(nextText);
     setTranscriptionError(null);
     setGenerationError(null);
-    setCards([]);
+    setHasSavedCurrentDraft(false);
   }
 
   return (
@@ -232,175 +233,79 @@ export default function HomeScreen() {
         {
           backgroundColor: palette.background,
           paddingTop: safeAreaInsets.top,
-          paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
+          paddingBottom: safeAreaInsets.bottom + Spacing.three,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
-      {__DEV__ ? (
-        <View style={styles.labEntry}>
-          <GlideButton
-            label="実験室"
-            caption="design lab"
-            icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-            tone="mint"
-            onPress={() => router.push('/design-lab')}
-          />
-        </View>
-      ) : null}
-
-      <ScrollView
-        style={styles.scrollArea}
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[
-          styles.scrollContent,
-          hasCards && styles.scrollContentWithCards,
-        ]}
-        automaticallyAdjustKeyboardInsets
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}>
-        <View style={styles.draftStack}>
-          {transcriptionError && (
-            <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
-              {transcriptionError}
-            </ThemedText>
-          )}
-
-          <GlideTextInput
-            value={diaryDraftText}
-            tone="cream"
-            accentTone="mint"
-            accessibilityLabel="今日の日本語を書く"
-            editable={isDraftInputEditable}
-            placeholder="今ふと考えていることをなんでも自由に日本語で話す・書く。"
-            frameStyle={styles.draftInputFrame}
-            inputStyle={[
-              styles.draftInput,
-              {
-                opacity: isDraftInputEditable ? 1 : 0.78,
-              },
-            ]}
-            onChangeText={handleDraftTextChange}
-          />
-
-          {hasCards && (
-            <View style={styles.generationComplete}>
-              <View style={styles.generationCompleteText}>
-                <ThemedText type="smallBold" selectable>
-                  英語カードを作成しました
-                </ThemedText>
-                <ThemedText type="small" themeColor="textSecondary" selectable>
-                  {cards.length}枚のカードを保存済み
-                </ThemedText>
-              </View>
-              <View style={styles.generationCompleteActions}>
-                <ActionButton
-                  label="英語タブで見る"
-                  icon={{ ios: 'text.book.closed.fill', android: 'menu_book', web: 'menu_book' }}
-                  variant="secondary"
-                  onPress={() => router.push('/english')}
-                />
-                <ActionButton
-                  label="復習する"
-                  icon={{
-                    ios: 'rectangle.stack.fill',
-                    android: 'view_carousel',
-                    web: 'view_carousel',
-                  }}
-                  variant="primary"
-                  onPress={() => router.push('/flashcards')}
-                />
-              </View>
-            </View>
-          )}
-
-          {isGeneratingCards && (
-            <View style={styles.loadingRow}>
-              <ActivityIndicator color={palette.primary} />
-              <ThemedText type="smallBold" selectable>
-                ネイティブ表現に分けています
+      <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+        <View style={styles.contentArea}>
+          <View style={styles.draftStack}>
+            {transcriptionError && (
+              <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
+                {transcriptionError}
               </ThemedText>
-            </View>
-          )}
+            )}
 
-          {generationError && (
-            <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
-              {generationError}
-            </ThemedText>
-          )}
-        </View>
+            <GlideTextInput
+              value={diaryDraftText}
+              tone="cream"
+              accentTone="mint"
+              accessibilityLabel="今日の日本語を書く"
+              editable={isDraftInputEditable}
+              placeholder="今ふと考えていることをなんでも自由に日本語で話す・書く。"
+              frameStyle={styles.draftInputFrame}
+              inputStyle={[
+                styles.draftInput,
+                {
+                  opacity: isDraftInputEditable ? 1 : 0.78,
+                },
+              ]}
+              onChangeText={handleDraftTextChange}
+            />
 
-        {hasCards && (
-          <View style={styles.cardList}>
-            {cards.map((card, index) => (
-              <View
-                key={card.id}
-                style={[
-                  styles.translationCard,
-                  {
-                    backgroundColor: palette.card,
-                    borderColor: palette.border,
-                  },
-                ]}>
-                <View style={styles.cardNumber}>
-                  <ThemedText type="code" themeColor="textSecondary">
-                    {String(index + 1).padStart(2, '0')}
-                  </ThemedText>
-                </View>
-                <View style={styles.cardBody}>
-                  <ThemedText style={styles.japaneseText} selectable>
-                    {card.japanese}
-                  </ThemedText>
-                  <View style={[styles.divider, { backgroundColor: palette.border }]} />
-                  <ThemedText style={styles.englishText} selectable>
-                    {card.english}
-                  </ThemedText>
-                </View>
-              </View>
-            ))}
+            {generationError && (
+              <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
+                {generationError}
+              </ThemedText>
+            )}
           </View>
-        )}
-      </ScrollView>
+        </View>
+      </TouchableWithoutFeedback>
 
       <View style={styles.buttonDock}>
-        {!hasCards && (
-          <GenerateCardsButton
-            disabled={isGenerateCardsButtonDisabled}
-            isLoading={isGeneratingCards}
-            onPress={handleGenerateCards}
-          />
-        )}
         <GlideButton
           label={
             isWritingButtonActive
-              ? 'Writing it up'
+              ? 'Making it'
               : isRecordingButtonActive
-                ? 'Done'
-                : shouldShowRetryAction
-                  ? 'Try again'
+                ? recordingButtonDurationLabel
+                : shouldShowMakeCardsAction
+                  ? 'Make cards'
                   : 'Speak it'
           }
-          badge={
+          accessibilityLabel={
             isRecordingButtonActive
-              ? formatDuration(recordingButtonDurationMillis)
+              ? `録音を停止 ${recordingButtonDurationLabel}`
+              : shouldShowMakeCardsAction
+                ? '英語カードを作る'
               : undefined
           }
           icon={
             isRecordingButtonActive
               ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
-              : isWritingButtonActive
+              : shouldShowMakeCardsAction
                 ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
-                : shouldShowRetryAction
-                  ? { ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' }
-                  : { ios: 'mic.fill', android: 'mic', web: 'mic' }
+                : { ios: 'mic.fill', android: 'mic', web: 'mic' }
           }
+          busy={isWritingButtonActive}
           tone={
             isWritingButtonActive
               ? 'aqua'
               : isRecordingButtonActive
                 ? 'orange'
-                : shouldShowRetryAction
-                  ? 'violet'
+                : shouldShowMakeCardsAction
+                  ? 'blue'
                   : 'mint'
           }
           size="large"
@@ -408,63 +313,10 @@ export default function HomeScreen() {
           pressed={isRecordingButtonPressed}
           holdPressOut={recorderState.isRecording}
           containerStyle={styles.recordButtonContainer}
-          onPress={handleRecordingPress}
+          onPress={handlePrimaryActionPress}
         />
       </View>
     </View>
-  );
-}
-
-function GenerateCardsButton({
-  disabled,
-  isLoading,
-  onPress,
-}: {
-  disabled: boolean;
-  isLoading: boolean;
-  onPress: () => void;
-}) {
-  const isUnavailable = disabled && !isLoading;
-  const tone = isLoading ? 'aqua' : 'cream';
-  const toneStyle = GlideTones[tone];
-  const badgeColor = isUnavailable ? '#111111' : toneStyle.accentColor;
-
-  return (
-    <GlideFrame
-      tone={tone}
-      size="large"
-      accessibilityLabel={isLoading ? '英語カードを作成中' : '英語カードを作る'}
-      accessibilityRole="button"
-      accessibilityState={{ disabled, busy: isLoading }}
-      disabled={disabled}
-      pressed={isLoading}
-      containerStyle={styles.generateButtonContainer}
-      style={styles.generateButton}
-      onPress={onPress}>
-      <View style={styles.generateButtonContent}>
-        <View style={[styles.generateButtonBadge, { backgroundColor: badgeColor }]}>
-          {isLoading ? (
-            <ActivityIndicator color={toneStyle.backgroundColor} size="small" />
-          ) : (
-            <SymbolView
-              name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-              size={17}
-              tintColor={toneStyle.backgroundColor}
-              fallback={<ThemedText style={{ color: toneStyle.backgroundColor }}>{'+'}</ThemedText>}
-            />
-          )}
-        </View>
-        <ThemedText style={[styles.generateButtonLabel, { color: toneStyle.textColor }]}>
-          {isLoading ? '英語カードを作成中' : '英語カードを作る'}
-        </ThemedText>
-        <SymbolView
-          name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }}
-          size={18}
-          tintColor={toneStyle.textColor}
-          fallback={<ThemedText style={{ color: toneStyle.textColor }}>{'>'}</ThemedText>}
-        />
-      </View>
-    </GlideFrame>
   );
 }
 
@@ -475,37 +327,26 @@ function formatDuration(durationMillis: number) {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 }
 
+async function setRecordingHapticsAllowed(allowed: boolean) {
+  await setHapticsAllowedDuringRecording(allowed).catch(() => undefined);
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     alignItems: 'center',
     gap: Spacing.three,
   },
-  scrollArea: {
+  contentArea: {
     flex: 1,
     width: '100%',
     maxWidth: MaxContentWidth,
-  },
-  labEntry: {
-    width: '100%',
-    maxWidth: MaxContentWidth,
-  },
-  scrollContent: {
-    flexGrow: 1,
     justifyContent: 'center',
     gap: Spacing.three,
     paddingVertical: Spacing.one,
   },
-  scrollContentWithCards: {
-    justifyContent: 'flex-start',
-  },
   draftStack: {
     width: '100%',
-    gap: Spacing.three,
-  },
-  loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: Spacing.three,
   },
   draftInputFrame: {
@@ -518,84 +359,15 @@ const styles = StyleSheet.create({
     lineHeight: 31,
     fontWeight: 900,
   },
-  generationComplete: {
-    gap: Spacing.three,
-  },
-  generationCompleteText: {
-    gap: Spacing.one,
-  },
-  generationCompleteActions: {
-    gap: Spacing.two,
-  },
   errorText: {
     fontSize: 16,
     lineHeight: 24,
     fontWeight: 600,
   },
-  cardList: {
-    gap: Spacing.three,
-  },
-  translationCard: {
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 24,
-    borderCurve: 'continuous',
-    padding: Spacing.three,
-    flexDirection: 'row',
-    gap: Spacing.three,
-  },
-  cardNumber: {
-    width: 28,
-    alignItems: 'center',
-    paddingTop: Spacing.one,
-  },
-  cardBody: {
-    flex: 1,
-    gap: Spacing.two,
-  },
-  japaneseText: {
-    fontSize: 17,
-    lineHeight: 26,
-    fontWeight: 600,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-  },
-  englishText: {
-    fontSize: 20,
-    lineHeight: 30,
-    fontWeight: 700,
-  },
   buttonDock: {
     width: '100%',
     maxWidth: MaxContentWidth,
     gap: Spacing.two,
-  },
-  generateButtonContainer: {
-    alignSelf: 'stretch',
-  },
-  generateButton: {
-    justifyContent: 'center',
-  },
-  generateButtonContent: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: Spacing.two,
-  },
-  generateButtonBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    borderCurve: 'continuous',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  generateButtonLabel: {
-    flex: 1,
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: 900,
   },
   recordButtonContainer: {
     opacity: 1,

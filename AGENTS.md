@@ -2,6 +2,12 @@
 
 Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing any code.
 
+## 確認運用
+
+- このリポジトリでは、ユーザーから明示的に依頼されない限り、実装後のブラウザ・Web確認は行わない。
+- ユーザーから明示的に依頼されない限り、`bun run ios`、`npx expo run:ios`、`xcodebuild` などのネイティブ/Expoビルドやアプリ起動は行わない。必要そうな場合も、まずユーザーに確認する。
+- 通常は `npx expo lint` や `npx tsc --noEmit` などの静的チェックを優先する。
+
 ## DB開発運用
 
 - このアプリは開発中のため、Supabaseの既存データ保持は優先しない。

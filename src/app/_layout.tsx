@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import '@/global.css';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
+import { GenerationModeProvider } from '@/hooks/use-generation-mode';
 import {
   ThemePreferenceProvider,
   useResolvedColorScheme,
@@ -14,7 +15,9 @@ export default function TabLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <ThemePreferenceProvider>
-        <RootNavigator />
+        <GenerationModeProvider>
+          <RootNavigator />
+        </GenerationModeProvider>
       </ThemePreferenceProvider>
     </GestureHandlerRootView>
   );

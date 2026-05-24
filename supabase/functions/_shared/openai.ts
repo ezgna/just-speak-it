@@ -33,7 +33,7 @@ export async function createOpenAIJsonResponse<T>({
       input,
       max_output_tokens: maxOutputTokens,
       reasoning: {
-        effort: 'low',
+        effort: 'medium',
       },
       text: {
         verbosity: 'low',

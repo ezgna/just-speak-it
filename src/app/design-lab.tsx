@@ -58,11 +58,11 @@ function ButtonSourceShelf() {
 
         <ButtonSourceSample label="compact">
           <GlideButton
-            label="Try again"
-            tone="violet"
+            label="Make cards"
+            tone="blue"
             size="compact"
             fullWidth={false}
-            icon={{ ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' }}
+            icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
           />
         </ButtonSourceSample>
       </View>
@@ -90,6 +90,7 @@ type GlideInputVariant = {
 
 const ColorSystemColors = {
   core: '#2FDD6C',
+  build: '#276EF1',
   warm: '#FF9F45',
   cool: '#65D7F2',
   shift: '#9B7CFF',
@@ -159,16 +160,16 @@ const CoreColorSystemRoles: ColorSystemRole[] = [
   {
     id: 'process',
     role: 'Cool',
-    label: 'Writing',
+    label: 'Making it',
     color: ColorSystemColors.cool,
     note: '処理 / 変換',
   },
   {
-    id: 'retry',
-    role: 'Shift',
-    label: 'Try again',
-    color: ColorSystemColors.shift,
-    note: '戻る / 再試行',
+    id: 'build',
+    role: 'Build',
+    label: 'Make cards',
+    color: ColorSystemColors.build,
+    note: '作成 / 次へ',
   },
   {
     id: 'alert',
@@ -200,7 +201,7 @@ function ColorSystemShelf() {
         <View style={styles.colorSystemCopy}>
           <ThemedText style={styles.colorSystemTitle}>Color System</ThemedText>
           <ThemedText style={styles.colorSystemDescription}>
-            緑をCoreにして、完了・処理・再試行を色相の違う役割色として固定する案。
+            緑をCoreにして、作成・完了・処理を色相の違う役割色として固定する案。
           </ThemedText>
         </View>
         <View style={styles.colorSystemAxisBadge}>
@@ -236,16 +237,16 @@ function ColorSystemShelf() {
           icon={{ ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }}
         />
         <GlideButton
-          label="Writing it up"
+          label="Making it"
           caption="Cool"
           tone="aqua"
-          icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+          busy
         />
         <GlideButton
-          label="Try again"
-          caption="Shift"
-          tone="violet"
-          icon={{ ios: 'arrow.counterclockwise', android: 'replay', web: 'replay' }}
+          label="Make cards"
+          caption="Build"
+          tone="blue"
+          icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
         />
       </View>
     </View>
