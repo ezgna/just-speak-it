@@ -11,6 +11,7 @@ export type Database = {
           original_text: string;
           plain_text: string;
           polished_text: string;
+          bullet_points: Json;
           content_hash: string;
           created_at: string;
           updated_at: string;
@@ -22,6 +23,7 @@ export type Database = {
           original_text: string;
           plain_text: string;
           polished_text: string;
+          bullet_points: Json;
           content_hash: string;
           created_at?: string;
           updated_at?: string;
@@ -33,6 +35,7 @@ export type Database = {
           original_text?: string;
           plain_text?: string;
           polished_text?: string;
+          bullet_points?: Json;
           content_hash?: string;
           created_at?: string;
           updated_at?: string;
@@ -44,7 +47,7 @@ export type Database = {
           user_id: string;
           diary_entry_id: string;
           generation_mode: 'natural' | 'compact';
-          practice_generation_status: 'processing' | 'completed' | 'failed';
+          practice_generation_status: 'draft' | 'translating' | 'completed' | 'failed';
           practice_generation_error: string | null;
           created_at: string;
           updated_at: string;
@@ -54,7 +57,7 @@ export type Database = {
           user_id: string;
           diary_entry_id: string;
           generation_mode?: 'natural' | 'compact';
-          practice_generation_status?: 'processing' | 'completed' | 'failed';
+          practice_generation_status?: 'draft' | 'translating' | 'completed' | 'failed';
           practice_generation_error?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -64,7 +67,7 @@ export type Database = {
           user_id?: string;
           diary_entry_id?: string;
           generation_mode?: 'natural' | 'compact';
-          practice_generation_status?: 'processing' | 'completed' | 'failed';
+          practice_generation_status?: 'draft' | 'translating' | 'completed' | 'failed';
           practice_generation_error?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -77,7 +80,7 @@ export type Database = {
           practice_generation_id: string;
           sort_order: number;
           japanese: string;
-          english: string;
+          english: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -87,7 +90,7 @@ export type Database = {
           practice_generation_id: string;
           sort_order?: number;
           japanese: string;
-          english: string;
+          english?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -97,7 +100,7 @@ export type Database = {
           practice_generation_id?: string;
           sort_order?: number;
           japanese?: string;
-          english?: string;
+          english?: string | null;
           created_at?: string;
           updated_at?: string;
         };

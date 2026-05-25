@@ -6,7 +6,7 @@ import {
   useAudioRecorderState,
 } from 'expo-audio';
 import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -17,7 +17,15 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideTextInput } from '@/components/ui/glide-text-input';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useGenerationMode } from '@/hooks/use-generation-mode';
-import { generatePracticeFromDiary, type TranslationCard } from '@/lib/backend/practice';
+import {
+  completePracticeDraft,
+  discardPracticeDraft,
+  getLatestPracticeDraft,
+  preparePracticeDraft,
+  type PracticeDraft,
+  type PracticeDraftCard,
+  type TranslationCard,
+} from '@/lib/backend/practice';
 import { setHapticsAllowedDuringRecording } from '@/lib/audio-session-haptics';
 import { notifyPracticeChanged } from '@/lib/practice-refresh';
 import { transcribeRecording } from '@/lib/backend/transcription';
@@ -41,47 +49,71 @@ export default function HomeScreen() {
   const [recordingStopDurationMillis, setRecordingStopDurationMillis] = useState(0);
   const [writingPressHeld, setWritingPressHeld] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
-  const [isGeneratingCards, setIsGeneratingCards] = useState(false);
+  const [isPreparingDraft, setIsPreparingDraft] = useState(false);
+  const [isCompletingPractice, setIsCompletingPractice] = useState(false);
   const [rawTranscriptText, setRawTranscriptText] = useState<string | null>(null);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
-  const [hasSavedCurrentDraft, setHasSavedCurrentDraft] = useState(false);
-  const [generatedPracticeCards, setGeneratedPracticeCards] = useState<TranslationCard[]>([]);
+  const [activeDraft, setActiveDraft] = useState<PracticeDraft | null>(null);
+  const [draftCards, setDraftCards] = useState<PracticeDraftCard[]>([]);
+  const [completedPracticeCards, setCompletedPracticeCards] = useState<TranslationCard[]>([]);
   const generationInFlightRef = useRef(false);
   const resetDraftOnBlurRef = useRef(false);
+  const draftInteractionVersionRef = useRef(0);
+  const currentDraft = activeDraft?.generationMode === generationMode ? activeDraft : null;
 
   const isRecordingButtonActive = recorderState.isRecording || isStoppingRecording;
-  const isWritingButtonActive = !isRecordingButtonActive && (isTranscribing || isGeneratingCards);
+  const isWritingButtonActive =
+    !isRecordingButtonActive && (isTranscribing || isPreparingDraft || isCompletingPractice);
   const recordingButtonDurationMillis = recorderState.isRecording
     ? recorderState.durationMillis
     : recordingStopDurationMillis;
   const recordingButtonDurationLabel = formatDuration(recordingButtonDurationMillis);
-  const isWorking = isRecordingBusy || isTranscribing || isGeneratingCards;
+  const isWorking = isRecordingBusy || isTranscribing || isPreparingDraft || isCompletingPractice;
   const isRecordingButtonPressed =
-    writingPressHeld || isTranscribing || isGeneratingCards;
+    writingPressHeld || isTranscribing || isPreparingDraft || isCompletingPractice;
+  const isPrimaryButtonBusy = isWritingButtonActive;
   const isRecordingButtonDisabled =
     isWorking || (recordingIntentActive && !recorderState.isRecording);
   const isDraftInputEditable =
-    !recorderState.isRecording && !isWorking;
+    !recorderState.isRecording && !isWorking && !currentDraft && completedPracticeCards.length === 0;
   const hasDraftText = diaryDraftText.trim().length > 0;
-  const hasGeneratedPracticeCards = generatedPracticeCards.length > 0;
+  const hasActiveDraft = Boolean(currentDraft && draftCards.length > 0);
+  const hasCompletedPracticeCards = completedPracticeCards.length > 0;
+  const shouldShowSplitAction =
+    hasDraftText && !hasActiveDraft && !hasCompletedPracticeCards && !isRecordingButtonActive && !isWritingButtonActive;
   const shouldShowMakeCardsAction =
-    hasDraftText && !hasSavedCurrentDraft && !isRecordingButtonActive && !isWritingButtonActive;
+    hasActiveDraft && !hasCompletedPracticeCards && !isRecordingButtonActive && !isWritingButtonActive;
   const shouldShowReviewAction =
-    hasDraftText &&
-    hasSavedCurrentDraft &&
-    hasGeneratedPracticeCards &&
+    hasCompletedPracticeCards &&
     !isRecordingButtonActive &&
     !isWritingButtonActive;
 
+  const markDraftInteraction = useCallback(() => {
+    draftInteractionVersionRef.current += 1;
+  }, []);
+
   const resetDraftState = useCallback(() => {
+    markDraftInteraction();
     setDiaryDraftText('');
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
     setTranscriptionError(null);
     setGenerationError(null);
-    setHasSavedCurrentDraft(false);
-    setGeneratedPracticeCards([]);
+    setActiveDraft(null);
+    setDraftCards([]);
+    setCompletedPracticeCards([]);
+  }, [markDraftInteraction]);
+
+  const applyPracticeDraft = useCallback((draft: PracticeDraft) => {
+    setActiveDraft(draft);
+    setDraftCards(draft.cards);
+    setCompletedPracticeCards([]);
+    setDiaryDraftText(draft.diaryEntry.plainText);
+    setDiaryDraftSource(draft.source);
+    setRawTranscriptText(draft.source === 'voice' ? draft.diaryEntry.originalText : null);
+    setTranscriptionError(null);
+    setGenerationError(null);
   }, []);
 
   useFocusEffect(
@@ -97,7 +129,42 @@ export default function HomeScreen() {
     }, [resetDraftState])
   );
 
+  useEffect(() => {
+    let isCancelled = false;
+    const restoreInteractionVersion = draftInteractionVersionRef.current;
+
+    async function restoreLatestDraft() {
+      try {
+        const draft = await getLatestPracticeDraft();
+
+        if (
+          isCancelled ||
+          !draft ||
+          draft.generationMode !== generationMode ||
+          draftInteractionVersionRef.current !== restoreInteractionVersion
+        ) {
+          return;
+        }
+
+        applyPracticeDraft(draft);
+      } catch (error) {
+        if (!isCancelled) {
+          setGenerationError(
+            error instanceof Error ? error.message : '分割下書きを復元できませんでした。'
+          );
+        }
+      }
+    }
+
+    void restoreLatestDraft();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [applyPracticeDraft, generationMode]);
+
   async function startRecording() {
+    markDraftInteraction();
     setIsRecordingBusy(true);
     setRecordingIntentActive(true);
     setIsStoppingRecording(false);
@@ -123,8 +190,9 @@ export default function HomeScreen() {
       setDiaryDraftText('');
       setDiaryDraftSource('voice');
       setRawTranscriptText(null);
-      setHasSavedCurrentDraft(false);
-      setGeneratedPracticeCards([]);
+      setActiveDraft(null);
+      setDraftCards([]);
+      setCompletedPracticeCards([]);
     } catch (error) {
       setRecordingIntentActive(false);
       void setRecordingHapticsAllowed(false);
@@ -187,7 +255,18 @@ export default function HomeScreen() {
       setRawTranscriptText(cleanedText ? transcript.rawText : null);
       setDiaryDraftText(cleanedText);
       setDiaryDraftSource(cleanedText ? 'voice' : 'text');
-      setGeneratedPracticeCards([]);
+      setActiveDraft(null);
+      setDraftCards([]);
+      setCompletedPracticeCards([]);
+      setIsTranscribing(false);
+
+      if (cleanedText) {
+        await handlePrepareDraft({
+          diaryText: cleanedText,
+          source: 'voice',
+          rawTranscriptText: transcript.rawText,
+        });
+      }
     } catch (error) {
       setTranscriptionError(
         error instanceof Error ? error.message : '音声の読み取りに失敗しました。'
@@ -198,35 +277,83 @@ export default function HomeScreen() {
     }
   }
 
-  async function handleGenerateCards() {
-    const diaryText = diaryDraftText.trim();
+  async function handlePrepareDraft({
+    diaryText,
+    source,
+    rawTranscriptText: nextRawTranscriptText,
+  }: {
+    diaryText: string;
+    source: DiaryDraftSource;
+    rawTranscriptText?: string | null;
+  }) {
+    markDraftInteraction();
+    const normalizedDiaryText = diaryText.trim();
 
     if (
-      !diaryText ||
-      isGeneratingCards ||
+      !normalizedDiaryText ||
+      isPreparingDraft ||
+      isCompletingPractice ||
       generationInFlightRef.current ||
-      hasSavedCurrentDraft
+      hasActiveDraft
     ) {
       return;
     }
 
     generationInFlightRef.current = true;
-    setIsGeneratingCards(true);
+    setIsPreparingDraft(true);
     setGenerationError(null);
-    setHasSavedCurrentDraft(false);
-    setGeneratedPracticeCards([]);
+    setActiveDraft(null);
+    setDraftCards([]);
+    setCompletedPracticeCards([]);
 
     try {
-      const practice = await generatePracticeFromDiary({
-        diaryText,
-        source: diaryDraftSource,
-        cleanedText: diaryText,
+      const draft = await preparePracticeDraft({
+        diaryText: normalizedDiaryText,
+        source,
+        cleanedText: normalizedDiaryText,
         rawTranscriptText:
-          diaryDraftSource === 'voice' ? rawTranscriptText ?? diaryText : diaryText,
+          source === 'voice' ? nextRawTranscriptText ?? normalizedDiaryText : normalizedDiaryText,
         generationMode,
       });
-      setGeneratedPracticeCards(practice.cards);
-      setHasSavedCurrentDraft(true);
+      applyPracticeDraft(draft);
+    } catch (error) {
+      setGenerationError(
+        error instanceof Error ? error.message : '分割カードの作成に失敗しました。'
+      );
+    } finally {
+      generationInFlightRef.current = false;
+      setIsPreparingDraft(false);
+    }
+  }
+
+  async function handleCompletePractice() {
+    markDraftInteraction();
+    if (
+      !currentDraft ||
+      draftCards.length === 0 ||
+      isCompletingPractice ||
+      generationInFlightRef.current
+    ) {
+      return;
+    }
+
+    generationInFlightRef.current = true;
+    setIsCompletingPractice(true);
+    setGenerationError(null);
+
+    try {
+      const practice = await completePracticeDraft({
+        practiceGenerationId: currentDraft.practiceGenerationId,
+        cards: draftCards.map((card) => ({
+          id: card.id,
+          japanese: card.japanese,
+        })),
+      });
+      setCompletedPracticeCards(practice.cards);
+      setActiveDraft(null);
+      setDraftCards([]);
+      setDiaryDraftText(practice.diaryEntry.plainText);
+      setDiaryDraftSource(practice.source);
       notifyPracticeChanged();
     } catch (error) {
       setGenerationError(
@@ -234,7 +361,7 @@ export default function HomeScreen() {
       );
     } finally {
       generationInFlightRef.current = false;
-      setIsGeneratingCards(false);
+      setIsCompletingPractice(false);
     }
   }
 
@@ -253,15 +380,45 @@ export default function HomeScreen() {
       return;
     }
 
-    if (hasDraftText && !hasSavedCurrentDraft) {
-      await handleGenerateCards();
+    if (shouldShowMakeCardsAction) {
+      await handleCompletePractice();
+      return;
+    }
+
+    if (hasDraftText) {
+      await handlePrepareDraft({
+        diaryText: diaryDraftText,
+        source: diaryDraftSource,
+        rawTranscriptText,
+      });
       return;
     }
 
     await startRecording();
   }
 
+  async function handleDiscardDraft() {
+    markDraftInteraction();
+    const draftId = currentDraft?.practiceGenerationId;
+
+    resetDraftState();
+
+    if (!draftId) {
+      return;
+    }
+
+    try {
+      await discardPracticeDraft(draftId);
+    } catch (error) {
+      setGenerationError(
+        error instanceof Error ? error.message : '分割下書きを破棄できませんでした。'
+      );
+    }
+  }
+
   function handleDraftTextChange(nextText: string) {
+    markDraftInteraction();
+
     if (!rawTranscriptText || !nextText.trim()) {
       setRawTranscriptText(null);
       setDiaryDraftSource('text');
@@ -270,8 +427,17 @@ export default function HomeScreen() {
     setDiaryDraftText(nextText);
     setTranscriptionError(null);
     setGenerationError(null);
-    setHasSavedCurrentDraft(false);
-    setGeneratedPracticeCards([]);
+    setActiveDraft(null);
+    setDraftCards([]);
+    setCompletedPracticeCards([]);
+  }
+
+  function handleDraftCardJapaneseChange(cardId: string, nextJapanese: string) {
+    setDraftCards((currentCards) =>
+      currentCards.map((card) =>
+        card.id === cardId ? { ...card, japanese: nextJapanese } : card
+      )
+    );
   }
 
   const contentArea = (
@@ -283,8 +449,14 @@ export default function HomeScreen() {
           </ThemedText>
         )}
 
-        {shouldShowReviewAction ? (
-          <GeneratedPracticePreview cards={generatedPracticeCards} />
+        {hasActiveDraft ? (
+          <GeneratedPracticePreview
+            cards={draftCards}
+            editable={!isCompletingPractice}
+            onCardJapaneseChange={handleDraftCardJapaneseChange}
+          />
+        ) : hasCompletedPracticeCards ? (
+          <GeneratedPracticePreview cards={completedPracticeCards} />
         ) : (
           <View style={styles.inputDismissArea}>
             <GlideTextInput
@@ -327,7 +499,7 @@ export default function HomeScreen() {
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
-      {shouldShowReviewAction ? (
+      {hasActiveDraft || hasCompletedPracticeCards ? (
         contentArea
       ) : (
         <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
@@ -338,24 +510,32 @@ export default function HomeScreen() {
       <View style={styles.buttonDock}>
         <GlideButton
           label={
-            isWritingButtonActive
-              ? 'Making it'
-              : isRecordingButtonActive
-                ? recordingButtonDurationLabel
-                : shouldShowReviewAction
-                  ? 'Review it'
-                  : shouldShowMakeCardsAction
-                    ? 'Make cards'
-                    : 'Speak it'
+            isTranscribing
+              ? 'Transcribing'
+              : isPreparingDraft
+                ? 'Splitting'
+                : isCompletingPractice
+                  ? 'Making it'
+                  : isRecordingButtonActive
+                    ? recordingButtonDurationLabel
+                    : shouldShowReviewAction
+                      ? 'Review it'
+                      : shouldShowMakeCardsAction
+                        ? 'Make cards'
+                        : shouldShowSplitAction
+                          ? 'Split it'
+                          : 'Speak it'
           }
           accessibilityLabel={
             isRecordingButtonActive
               ? `録音を停止 ${recordingButtonDurationLabel}`
               : shouldShowReviewAction
                 ? '作った英語カードを復習する'
-                : shouldShowMakeCardsAction
+              : shouldShowMakeCardsAction
                   ? '英語カードを作る'
-                  : undefined
+                  : shouldShowSplitAction
+                    ? '日本語を英語カード向けに分割する'
+                    : undefined
           }
           icon={
             isRecordingButtonActive
@@ -364,18 +544,24 @@ export default function HomeScreen() {
                 ? { ios: 'rectangle.stack.fill', android: 'layers', web: 'layers' }
                 : shouldShowMakeCardsAction
                   ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
-                  : { ios: 'mic.fill', android: 'mic', web: 'mic' }
+                  : shouldShowSplitAction || isPreparingDraft
+                    ? { ios: 'rectangle.split.2x1.fill', android: 'splitscreen', web: 'splitscreen' }
+                    : { ios: 'mic.fill', android: 'mic', web: 'mic' }
           }
-          busy={isWritingButtonActive}
+          busy={isPrimaryButtonBusy}
           tone={
-            isWritingButtonActive
+            isPreparingDraft || isTranscribing
               ? 'aqua'
+              : isCompletingPractice
+                ? 'blue'
               : isRecordingButtonActive
                 ? 'orange'
                 : shouldShowReviewAction
                   ? 'grape'
                   : shouldShowMakeCardsAction
                     ? 'blue'
+                    : shouldShowSplitAction
+                      ? 'orange'
                     : 'mint'
           }
           size="large"
@@ -385,6 +571,16 @@ export default function HomeScreen() {
           containerStyle={styles.recordButtonContainer}
           onPress={handlePrimaryActionPress}
         />
+
+        {hasActiveDraft && !isCompletingPractice ? (
+          <GlideButton
+            label="Start over"
+            icon={{ ios: 'arrow.counterclockwise', android: 'refresh', web: 'refresh' }}
+            tone="coral"
+            size="medium"
+            onPress={handleDiscardDraft}
+          />
+        ) : null}
       </View>
     </View>
   );

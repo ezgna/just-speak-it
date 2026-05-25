@@ -19,13 +19,14 @@ import { listDiaryEntries, type DiaryEntry } from '@/lib/backend/practice';
 import { subscribeToPracticeRefresh } from '@/lib/practice-refresh';
 
 type LoadMode = 'initial' | 'refresh' | 'sync';
-type DiaryDisplayMode = 'original' | 'plain' | 'polished';
+type DiaryDisplayMode = 'original' | 'plain' | 'polished' | 'bullets';
 const WebTopTabInset = process.env.EXPO_OS === 'web' ? 76 : 0;
 
 const DiaryDisplayModeOptions: { label: string; value: DiaryDisplayMode }[] = [
   { label: '原文', value: 'original' },
   { label: 'そのまま', value: 'plain' },
   { label: '読みやすく', value: 'polished' },
+  { label: '箇条書き', value: 'bullets' },
 ];
 
 const DiaryColors = {
@@ -263,10 +264,31 @@ function DiaryPaper({
       <ThemedText style={styles.diaryPaperDate} selectable>
         {formatDate(entry.createdAt)}
       </ThemedText>
-      <ThemedText style={styles.diaryPaperBody} selectable>
-        {getDiaryDisplayText(entry, displayMode)}
-      </ThemedText>
+      {displayMode === 'bullets' ? (
+        <DiaryBulletList points={entry.bulletPoints} />
+      ) : (
+        <ThemedText style={styles.diaryPaperBody} selectable>
+          {getDiaryDisplayText(entry, displayMode)}
+        </ThemedText>
+      )}
     </DiaryPaperSurface>
+  );
+}
+
+function DiaryBulletList({ points }: { points: string[] }) {
+  const visiblePoints = points.length > 0 ? points : ['本文はありません。'];
+
+  return (
+    <View style={styles.diaryBulletList}>
+      {visiblePoints.map((point, index) => (
+        <View key={`${index}-${point}`} style={styles.diaryBulletRow}>
+          <ThemedText style={styles.diaryBulletMark}>・</ThemedText>
+          <ThemedText style={styles.diaryBulletText} selectable>
+            {normalizeDisplayText(point)}
+          </ThemedText>
+        </View>
+      ))}
+    </View>
   );
 }
 
@@ -310,7 +332,7 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function getDiaryDisplayText(entry: DiaryEntry, displayMode: DiaryDisplayMode) {
+function getDiaryDisplayText(entry: DiaryEntry, displayMode: Exclude<DiaryDisplayMode, 'bullets'>) {
   if (displayMode === 'original') {
     return normalizeDisplayText(entry.originalText);
   }
@@ -349,7 +371,7 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   modeSwitch: {
-    alignSelf: 'flex-start',
+    alignSelf: 'stretch',
     flexDirection: 'row',
     overflow: 'hidden',
     borderRadius: 18,
@@ -359,11 +381,12 @@ const styles = StyleSheet.create({
     backgroundColor: DiaryColors.paper,
   },
   modeButton: {
+    flex: 1,
     minHeight: 44,
-    minWidth: 88,
+    minWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: Spacing.three,
+    paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.two,
   },
   modeButtonDivider: {
@@ -404,6 +427,29 @@ const styles = StyleSheet.create({
     fontWeight: 900,
   },
   diaryPaperBody: {
+    color: DiaryColors.bodyText,
+    fontSize: 17,
+    lineHeight: 28,
+    fontWeight: 800,
+  },
+  diaryBulletList: {
+    gap: Spacing.one,
+  },
+  diaryBulletRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.one,
+  },
+  diaryBulletMark: {
+    width: 18,
+    color: DiaryColors.bodyText,
+    fontSize: 17,
+    lineHeight: 28,
+    fontWeight: 900,
+    textAlign: 'center',
+  },
+  diaryBulletText: {
+    flex: 1,
     color: DiaryColors.bodyText,
     fontSize: 17,
     lineHeight: 28,

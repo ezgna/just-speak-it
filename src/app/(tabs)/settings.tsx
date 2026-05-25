@@ -4,7 +4,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GenerationModeSelector } from '@/components/generation-mode-selector';
 import { useDailyPalette } from '@/components/daily-to-english-ui';
-import { ThemedText } from '@/components/themed-text';
 import { ThemePreferenceSelector } from '@/components/theme-preference-selector';
 import { GlideButton } from '@/components/ui/glide-button';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -27,24 +26,19 @@ export default function SettingsScreen() {
         },
       ]}>
       <View style={styles.container}>
-        <View style={styles.header}>
-          <ThemedText type="subtitle" selectable>
-            設定
-          </ThemedText>
-        </View>
-
-        <ThemePreferenceSelector />
-        <GenerationModeSelector />
-
         {__DEV__ ? (
           <GlideButton
             label="実験室"
             caption="design lab"
             icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
             tone="mint"
+            size="medium"
             onPress={() => router.push('/design-lab')}
           />
         ) : null}
+
+        <ThemePreferenceSelector />
+        <GenerationModeSelector />
       </View>
     </ScrollView>
   );
@@ -61,9 +55,6 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     maxWidth: MaxContentWidth,
-    gap: Spacing.three,
-  },
-  header: {
-    gap: Spacing.one,
+    gap: Spacing.four,
   },
 });

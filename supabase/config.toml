@@ -386,6 +386,12 @@ verify_jwt = true
 [functions.generate-practice]
 verify_jwt = true
 
+[functions.prepare-practice-draft]
+verify_jwt = true
+
+[functions.complete-practice]
+verify_jwt = true
+
 [analytics]
 enabled = true
 port = 54327

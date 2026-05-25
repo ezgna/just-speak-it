@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getLocalString, setLocalString } from '@/lib/local-storage';
 
 export type CardLearningStatus = 'new' | 'learning' | 'known';
 export type CardLearningProgress = {
@@ -102,8 +102,9 @@ export async function loadCardLearningStatuses() {
     return loadPromise;
   }
 
-  loadPromise = AsyncStorage.getItem(CardStatusStorageKey)
-    .then((storedStatuses) => {
+  loadPromise = Promise.resolve()
+    .then(() => {
+      const storedStatuses = getLocalString(CardStatusStorageKey);
       cachedStatuses = parseStoredCardStatuses(storedStatuses);
       hasLoadedStatuses = true;
       notifyCardLearningStatusListeners();
@@ -157,7 +158,9 @@ function persistCardLearningStatuses() {
   const serializedStatuses = JSON.stringify(cachedStatuses);
   writePromise = writePromise
     .catch(() => undefined)
-    .then(() => AsyncStorage.setItem(CardStatusStorageKey, serializedStatuses));
+    .then(() => {
+      setLocalString(CardStatusStorageKey, serializedStatuses);
+    });
 
   return writePromise;
 }

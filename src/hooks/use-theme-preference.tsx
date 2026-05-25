@@ -1,15 +1,14 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
   use,
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { getLocalString, setLocalString } from '@/lib/local-storage';
 
 export type ThemePreference = 'system' | 'light' | 'dark';
 export type ResolvedColorScheme = 'light' | 'dark';
@@ -32,33 +31,15 @@ function isThemePreference(value: string | null): value is ThemePreference {
 export function ThemePreferenceProvider({ children }: { children: ReactNode }) {
   const systemScheme = useColorScheme();
   const systemColorScheme: ResolvedColorScheme = systemScheme === 'dark' ? 'dark' : 'light';
-  const [themePreference, setThemePreferenceState] = useState<ThemePreference>('system');
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    AsyncStorage.getItem(ThemePreferenceStorageKey)
-      .then((storedPreference) => {
-        if (isMounted && isThemePreference(storedPreference)) {
-          setThemePreferenceState(storedPreference);
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (isMounted) {
-          setIsLoaded(true);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => {
+    const storedPreference = getLocalString(ThemePreferenceStorageKey);
+    return isThemePreference(storedPreference) ? storedPreference : 'system';
+  });
+  const isLoaded = true;
 
   const setThemePreference = useCallback((nextPreference: ThemePreference) => {
     setThemePreferenceState(nextPreference);
-    void AsyncStorage.setItem(ThemePreferenceStorageKey, nextPreference).catch(() => undefined);
+    setLocalString(ThemePreferenceStorageKey, nextPreference);
   }, []);
 
   const resolvedColorScheme =

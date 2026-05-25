@@ -1,15 +1,14 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   createContext,
   use,
   useCallback,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react';
 
 import { isGenerationMode, type GenerationMode } from '@/lib/generation-mode';
+import { getLocalString, setLocalString } from '@/lib/local-storage';
 
 type GenerationModeContextValue = {
   generationMode: GenerationMode;
@@ -18,36 +17,19 @@ type GenerationModeContextValue = {
 };
 
 const GenerationModeStorageKey = 'just-speak-it:generation-mode:v1';
+const DefaultGenerationMode: GenerationMode = 'compact';
 const GenerationModeContext = createContext<GenerationModeContextValue | null>(null);
 
 export function GenerationModeProvider({ children }: { children: ReactNode }) {
-  const [generationMode, setGenerationModeState] = useState<GenerationMode>('natural');
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    AsyncStorage.getItem(GenerationModeStorageKey)
-      .then((storedMode) => {
-        if (isMounted && isGenerationMode(storedMode)) {
-          setGenerationModeState(storedMode);
-        }
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (isMounted) {
-          setIsLoaded(true);
-        }
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
+  const [generationMode, setGenerationModeState] = useState<GenerationMode>(() => {
+    const storedMode = getLocalString(GenerationModeStorageKey);
+    return isGenerationMode(storedMode) ? storedMode : DefaultGenerationMode;
+  });
+  const isLoaded = true;
 
   const setGenerationMode = useCallback((nextMode: GenerationMode) => {
     setGenerationModeState(nextMode);
-    void AsyncStorage.setItem(GenerationModeStorageKey, nextMode).catch(() => undefined);
+    setLocalString(GenerationModeStorageKey, nextMode);
   }, []);
 
   const value = useMemo(

@@ -7,10 +7,11 @@ type TranslationCard = {
 };
 
 type GenerationMode = 'natural' | 'compact';
-type PracticeGenerationStatus = 'processing' | 'completed' | 'failed';
+type PracticeGenerationStatus = 'draft' | 'translating' | 'completed' | 'failed';
 
 type GeneratePracticeOutput = {
   polishedText: string;
+  bulletPoints: string[];
   cards: TranslationCard[];
 };
 
@@ -21,6 +22,7 @@ type DiaryEntryRow = {
   original_text: string;
   plain_text: string;
   polished_text: string;
+  bullet_points: unknown;
   content_hash: string;
   created_at: string;
   updated_at: string;
@@ -55,10 +57,15 @@ type GenerationClaim =
 const translationCardSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['polishedText', 'cards'],
+  required: ['polishedText', 'bulletPoints', 'cards'],
   properties: {
     polishedText: {
       type: 'string',
+    },
+    bulletPoints: {
+      type: 'array',
+      minItems: 1,
+      items: { type: 'string' },
     },
     cards: {
       type: 'array',
@@ -77,7 +84,7 @@ const translationCardSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, original_text, plain_text, polished_text, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
 const translationCardSelect = 'id, practice_generation_id, sort_order, japanese, english, created_at';
@@ -177,6 +184,7 @@ export default {
     }
 
     const polishedText = normalizeDiaryText(output.polishedText, plainText);
+    const bulletPoints = normalizeBulletPoints(output.bulletPoints, polishedText);
 
     const cardDrafts = output.cards
       .map((card, index) => ({
@@ -202,6 +210,7 @@ export default {
         original_text: originalText,
         plain_text: plainText,
         polished_text: polishedText,
+        bullet_points: bulletPoints,
       })
       .eq('id', claimedDiaryEntry.id)
       .select(diaryEntrySelect)
@@ -346,6 +355,7 @@ async function getOrCreateDiaryEntry(
       original_text: originalText,
       plain_text: plainText,
       polished_text: plainText,
+      bullet_points: [createFallbackBulletPoint(plainText)],
       content_hash: contentHash,
     })
     .select(diaryEntrySelect)
@@ -394,13 +404,13 @@ async function claimPracticeGeneration(
 ) {
   const { data: practiceGeneration, error } = await context.supabase
     .from('practice_generations')
-    .insert({
-      user_id: userId,
-      diary_entry_id: diaryEntry.id,
-      generation_mode: generationMode,
-      practice_generation_status: 'processing',
-      practice_generation_error: null,
-    })
+      .insert({
+        user_id: userId,
+        diary_entry_id: diaryEntry.id,
+        generation_mode: generationMode,
+        practice_generation_status: 'translating',
+        practice_generation_error: null,
+      })
     .select(practiceGenerationSelect)
     .single();
 
@@ -494,7 +504,7 @@ async function waitForExistingPractice(
     }
 
     if (
-      existingPracticeGeneration.practiceGeneration.practice_generation_status === 'processing' &&
+      existingPracticeGeneration.practiceGeneration.practice_generation_status === 'translating' &&
       isProcessingStale(existingPracticeGeneration.practiceGeneration)
     ) {
       return {
@@ -575,7 +585,7 @@ async function claimExistingPracticeGenerationForRetry(
   const { data, error } = await context.supabase
     .from('practice_generations')
     .update({
-      practice_generation_status: 'processing',
+      practice_generation_status: 'translating',
       practice_generation_error: null,
     })
     .eq('id', practiceGeneration.id)
@@ -644,7 +654,7 @@ function delay(ms: number) {
 }
 
 function parseGenerationMode(value: unknown): GenerationMode {
-  return value === 'compact' ? 'compact' : 'natural';
+  return value === 'natural' ? 'natural' : 'compact';
 }
 
 function createPracticeInstructions(generationMode: GenerationMode) {
@@ -654,6 +664,11 @@ function createPracticeInstructions(generationMode: GenerationMode) {
     'polishedText は日記タブの「読みやすく」表示にそのまま出す日本語本文です。',
     'polishedText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
     'polishedText は入力をそのまま長く整えるのではなく、適度に簡潔な日記文にしてください。',
+    'bulletPoints は日記タブの「箇条書き」表示にそのまま出す短い日本語メモ配列です。',
+    'bulletPoints は最低1個、上限なしです。内容に応じて必要な数だけ返してください。',
+    'bulletPoints は空文字、見出し、番号、先頭の記号を含めないでください。',
+    'bulletPoints は出来事、感情、気づき、次に覚えておきたいことを、本人があとで見返す短い日記メモとして書いてください。',
+    'bulletPoints でも新しい解釈、アドバイス、事実、理由、感情を足さないでください。',
     '同じ気持ちや状況を繰り返している部分、意味の薄い補足、口癖、言い直しは削ってください。',
     '元の出来事、感情、温度感、主観の芯は保ってください。',
     '事実、理由、感情を新しく足さないでください。必要な意味まで削りすぎないでください。',
@@ -698,6 +713,7 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     original_text: diaryEntry.original_text,
     plain_text: diaryEntry.plain_text,
     polished_text: diaryEntry.polished_text,
+    bullet_points: diaryEntry.bullet_points,
     created_at: diaryEntry.created_at,
   };
 }
@@ -720,4 +736,20 @@ function normalizeDiaryText(value: string, fallbackText: string) {
   }
 
   return fallbackText.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function normalizeBulletPoints(value: string[], fallbackText: string) {
+  const bulletPoints = value
+    .map((point) => point.replace(/^[\s・\-*、。]+/g, '').trim())
+    .filter((point) => point.length > 0);
+
+  if (bulletPoints.length > 0) {
+    return bulletPoints;
+  }
+
+  return [createFallbackBulletPoint(fallbackText)];
+}
+
+function createFallbackBulletPoint(value: string) {
+  return value.replace(/\s+/g, ' ').trim() || '本文はありません。';
 }

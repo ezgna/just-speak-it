@@ -11,6 +11,47 @@ export type TranslationCard = {
   createdAt?: string;
 };
 
+export type PracticeGenerationStatus = 'draft' | 'translating' | 'completed' | 'failed';
+
+export type PracticeDraftCard = {
+  id: string;
+  practiceGenerationId: string;
+  sortOrder: number;
+  japanese: string;
+  english: null;
+  createdAt?: string;
+};
+
+export type PracticeDiaryEntry = {
+  id: string;
+  source: 'text' | 'voice';
+  originalText: string;
+  plainText: string;
+  polishedText: string;
+  bulletPoints: string[];
+  createdAt: string;
+};
+
+export type PracticeDraft = {
+  diaryEntry: PracticeDiaryEntry;
+  generationMode: GenerationMode;
+  practiceGenerationId: string;
+  source: 'text' | 'voice';
+  status: 'draft';
+  cards: PracticeDraftCard[];
+  createdAt: string;
+};
+
+export type CompletedPractice = {
+  diaryEntry: PracticeDiaryEntry;
+  generationMode: GenerationMode;
+  practiceGenerationId: string;
+  source: 'text' | 'voice';
+  status: 'completed';
+  cards: TranslationCard[];
+  createdAt: string;
+};
+
 export type TranslationCardGroup = {
   diaryEntryId: string;
   generationMode: GenerationMode;
@@ -27,7 +68,7 @@ type TranslationCardRow = {
   practice_generation_id: string;
   sort_order: number;
   japanese: string;
-  english: string;
+  english: string | null;
   created_at?: string;
 };
 
@@ -37,6 +78,7 @@ export type DiaryEntry = {
   originalText: string;
   plainText: string;
   polishedText: string;
+  bulletPoints: string[];
   createdAt: string;
 };
 
@@ -46,6 +88,7 @@ type DiaryEntryRow = {
   original_text: string;
   plain_text: string;
   polished_text: string;
+  bullet_points: unknown;
   created_at: string;
 };
 
@@ -60,10 +103,12 @@ type PracticeGenerationRow = {
   id: string;
   diary_entry_id: string;
   generation_mode: GenerationMode;
+  practice_generation_status?: PracticeGenerationStatus;
   created_at: string;
+  updated_at?: string;
 };
 
-export type GeneratePracticeParams = {
+export type PreparePracticeDraftParams = {
   diaryText: string;
   generationMode?: GenerationMode;
   source: 'text' | 'voice';
@@ -71,31 +116,53 @@ export type GeneratePracticeParams = {
   cleanedText?: string;
 };
 
-export type GeneratePracticeResponse = {
-  diaryEntry: {
-    id: string;
-    source: 'text' | 'voice';
-    original_text: string;
-    plain_text: string;
-    polished_text: string;
-    created_at: string;
-  };
-  cards: TranslationCardRow[];
-  reused?: boolean;
+type PracticeFunctionDiaryEntry = {
+  id: string;
+  source: 'text' | 'voice';
+  original_text: string;
+  plain_text: string;
+  polished_text: string;
+  bullet_points?: unknown;
+  created_at: string;
 };
 
-export async function generatePracticeFromDiary({
+type PracticeFunctionGeneration = {
+  id: string;
+  diary_entry_id: string;
+  generation_mode: GenerationMode;
+  practice_generation_status: PracticeGenerationStatus;
+  created_at: string;
+};
+
+export type PreparePracticeDraftResponse = {
+  diaryEntry: PracticeFunctionDiaryEntry;
+  practiceGeneration: PracticeFunctionGeneration;
+  cards: TranslationCardRow[];
+};
+
+export type CompletePracticeDraftParams = {
+  practiceGenerationId: string;
+  cards: { id: string; japanese: string }[];
+};
+
+export type CompletePracticeResponse = {
+  diaryEntry: PracticeFunctionDiaryEntry;
+  practiceGeneration: PracticeFunctionGeneration;
+  cards: TranslationCardRow[];
+};
+
+export async function preparePracticeDraft({
   diaryText,
-  generationMode = 'natural',
+  generationMode = 'compact',
   source,
   rawTranscriptText,
   cleanedText,
-}: GeneratePracticeParams) {
+}: PreparePracticeDraftParams) {
   await ensureAnonymousSession();
 
   const supabase = requireSupabaseClient();
-  const { data, error } = await supabase.functions.invoke<GeneratePracticeResponse>(
-    'generate-practice',
+  const { data, error } = await supabase.functions.invoke<PreparePracticeDraftResponse>(
+    'prepare-practice-draft',
     {
       body: {
         diaryText,
@@ -112,19 +179,162 @@ export async function generatePracticeFromDiary({
   }
 
   if (!data?.cards?.length) {
+    throw new Error('分割カードを作成できませんでした。');
+  }
+
+  return mapPracticeDraftResponse(data);
+}
+
+export async function completePracticeDraft({
+  practiceGenerationId,
+  cards,
+}: CompletePracticeDraftParams) {
+  await ensureAnonymousSession();
+
+  const supabase = requireSupabaseClient();
+  const { data, error } = await supabase.functions.invoke<CompletePracticeResponse>(
+    'complete-practice',
+    {
+      body: {
+        practiceGenerationId,
+        cards,
+      },
+    }
+  );
+
+  if (error) {
+    throw await normalizeFunctionError(error);
+  }
+
+  if (!data?.cards?.length) {
     throw new Error('英語カードを作成できませんでした。');
   }
 
+  return mapCompletedPracticeResponse(data);
+}
+
+export async function getLatestPracticeDraft() {
+  await ensureAnonymousSession();
+
+  const supabase = requireSupabaseClient();
+  const { data: generationRows, error: generationError } = await supabase
+    .from('practice_generations')
+    .select('id, diary_entry_id, generation_mode, practice_generation_status, created_at, updated_at')
+    .eq('practice_generation_status', 'draft')
+    .order('updated_at', { ascending: false })
+    .limit(1);
+
+  if (generationError) {
+    throw generationError;
+  }
+
+  const generation = (generationRows?.[0] ?? null) as PracticeGenerationRow | null;
+
+  if (!generation) {
+    return null;
+  }
+
+  const { data: diaryEntry, error: diaryError } = await supabase
+    .from('diary_entries')
+    .select('id, source, original_text, plain_text, polished_text, bullet_points, created_at')
+    .eq('id', generation.diary_entry_id)
+    .maybeSingle();
+
+  if (diaryError) {
+    throw diaryError;
+  }
+
+  if (!diaryEntry) {
+    return null;
+  }
+
+  const { data: cards, error: cardsError } = await supabase
+    .from('translation_cards')
+    .select('id, practice_generation_id, sort_order, japanese, english, created_at')
+    .eq('practice_generation_id', generation.id)
+    .order('sort_order', { ascending: true });
+
+  if (cardsError) {
+    throw cardsError;
+  }
+
+  if (!cards?.length) {
+    return null;
+  }
+
   return {
-    diaryEntry: data.diaryEntry,
-    cards: data.cards.map((card) => ({
+    diaryEntry: mapPracticeDiaryEntry(diaryEntry as DiaryEntryRow),
+    generationMode: generation.generation_mode,
+    practiceGenerationId: generation.id,
+    source: (diaryEntry as DiaryEntryRow).source,
+    status: 'draft',
+    cards: (cards as TranslationCardRow[]).map(mapPracticeDraftCard),
+    createdAt: generation.created_at,
+  } satisfies PracticeDraft;
+}
+
+export async function discardPracticeDraft(practiceGenerationId: string) {
+  await ensureAnonymousSession();
+
+  const supabase = requireSupabaseClient();
+  const { data: generation, error: generationError } = await supabase
+    .from('practice_generations')
+    .select('id, diary_entry_id, practice_generation_status')
+    .eq('id', practiceGenerationId)
+    .eq('practice_generation_status', 'draft')
+    .maybeSingle();
+
+  if (generationError) {
+    throw generationError;
+  }
+
+  if (!generation) {
+    return;
+  }
+
+  const draftGeneration = generation as { diary_entry_id: string };
+  const { error } = await supabase
+    .from('diary_entries')
+    .delete()
+    .eq('id', draftGeneration.diary_entry_id);
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function generatePracticeFromDiary(params: PreparePracticeDraftParams) {
+  const draft = await preparePracticeDraft(params);
+  return completePracticeDraft({
+    practiceGenerationId: draft.practiceGenerationId,
+    cards: draft.cards.map((card) => ({
       id: card.id,
-      practiceGenerationId: card.practice_generation_id,
-      sortOrder: card.sort_order,
       japanese: card.japanese,
-      english: card.english,
-      createdAt: card.created_at,
     })),
+  });
+}
+
+function mapPracticeDraftResponse(data: PreparePracticeDraftResponse): PracticeDraft {
+  return {
+    diaryEntry: mapPracticeFunctionDiaryEntry(data.diaryEntry),
+    generationMode: data.practiceGeneration.generation_mode,
+    practiceGenerationId: data.practiceGeneration.id,
+    source: data.diaryEntry.source,
+    status: 'draft',
+    cards: data.cards.map(mapPracticeDraftCard),
+    createdAt: data.practiceGeneration.created_at,
+  };
+}
+
+function mapCompletedPracticeResponse(data: CompletePracticeResponse): CompletedPractice {
+  return {
+    diaryEntry: mapPracticeFunctionDiaryEntry(data.diaryEntry),
+    generationMode: data.practiceGeneration.generation_mode,
+    practiceGenerationId: data.practiceGeneration.id,
+    source: data.diaryEntry.source,
+    status: 'completed',
+    cards: data.cards.map(mapTranslationCard),
+    createdAt: data.practiceGeneration.created_at,
   };
 }
 
@@ -132,23 +342,51 @@ export async function listDiaryEntries() {
   await ensureAnonymousSession();
 
   const supabase = requireSupabaseClient();
+  const { data: generationRows, error: generationsError } = await supabase
+    .from('practice_generations')
+    .select('diary_entry_id, created_at')
+    .eq('practice_generation_status', 'completed')
+    .order('created_at', { ascending: false });
+
+  if (generationsError) {
+    throw generationsError;
+  }
+
+  const diaryEntryIds = Array.from(
+    new Set(
+      ((generationRows ?? []) as { diary_entry_id: string }[]).map(
+        (generation) => generation.diary_entry_id
+      )
+    )
+  );
+
+  if (diaryEntryIds.length === 0) {
+    return [];
+  }
+
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
-    .select('id, source, original_text, plain_text, polished_text, created_at')
-    .order('created_at', { ascending: false });
+    .select('id, source, original_text, plain_text, polished_text, bullet_points, created_at')
+    .in('id', diaryEntryIds);
 
   if (entriesError) {
     throw entriesError;
   }
 
-  return ((entries ?? []) as DiaryEntryRow[]).map((entry) => ({
-    id: entry.id,
-    source: entry.source,
-    originalText: entry.original_text,
-    plainText: normalizeDiaryBodyText(entry.plain_text),
-    polishedText: normalizeDiaryBodyText(entry.polished_text),
-    createdAt: entry.created_at,
-  }));
+  const entriesById = new Map(((entries ?? []) as DiaryEntryRow[]).map((entry) => [entry.id, entry]));
+
+  return diaryEntryIds
+    .map((entryId) => entriesById.get(entryId) ?? null)
+    .filter((entry): entry is DiaryEntryRow => entry !== null)
+    .map((entry) => ({
+      id: entry.id,
+      source: entry.source,
+      originalText: entry.original_text,
+      plainText: normalizeDiaryBodyText(entry.plain_text),
+      polishedText: normalizeDiaryBodyText(entry.polished_text),
+      bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
+      createdAt: entry.created_at,
+    }));
 }
 
 export async function listTranslationCardGroups() {
@@ -201,7 +439,12 @@ export async function listTranslationCardGroups() {
   const cardsByPracticeGenerationId = new Map<string, TranslationCard[]>();
 
   for (const card of data ?? []) {
-    const mappedCard = mapTranslationCard(card);
+    const mappedCard = mapCompletedTranslationCard(card);
+
+    if (!mappedCard) {
+      continue;
+    }
+
     const generationCards =
       cardsByPracticeGenerationId.get(mappedCard.practiceGenerationId) ?? [];
     generationCards.push(mappedCard);
@@ -280,9 +523,76 @@ function mapTranslationCard(card: TranslationCardRow): TranslationCard {
     practiceGenerationId: card.practice_generation_id,
     sortOrder: card.sort_order,
     japanese: card.japanese,
-    english: card.english,
+    english: card.english ?? '',
     createdAt: card.created_at,
   };
+}
+
+function mapCompletedTranslationCard(card: TranslationCardRow): TranslationCard | null {
+  const english = card.english?.trim();
+
+  if (!english) {
+    return null;
+  }
+
+  return {
+    id: card.id,
+    practiceGenerationId: card.practice_generation_id,
+    sortOrder: card.sort_order,
+    japanese: card.japanese,
+    english,
+    createdAt: card.created_at,
+  };
+}
+
+function mapPracticeDraftCard(card: TranslationCardRow): PracticeDraftCard {
+  return {
+    id: card.id,
+    practiceGenerationId: card.practice_generation_id,
+    sortOrder: card.sort_order,
+    japanese: card.japanese,
+    english: null,
+    createdAt: card.created_at,
+  };
+}
+
+function mapPracticeFunctionDiaryEntry(entry: PracticeFunctionDiaryEntry): PracticeDiaryEntry {
+  return {
+    id: entry.id,
+    source: entry.source,
+    originalText: entry.original_text,
+    plainText: normalizeDiaryBodyText(entry.plain_text),
+    polishedText: normalizeDiaryBodyText(entry.polished_text),
+    bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
+    createdAt: entry.created_at,
+  };
+}
+
+function mapPracticeDiaryEntry(entry: DiaryEntryRow): PracticeDiaryEntry {
+  return {
+    id: entry.id,
+    source: entry.source,
+    originalText: entry.original_text,
+    plainText: normalizeDiaryBodyText(entry.plain_text),
+    polishedText: normalizeDiaryBodyText(entry.polished_text),
+    bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
+    createdAt: entry.created_at,
+  };
+}
+
+function normalizeBulletPoints(value: unknown, fallbackText: string) {
+  if (Array.isArray(value)) {
+    const bulletPoints = value
+      .filter((point): point is string => typeof point === 'string')
+      .map((point) => point.replace(/^[\s・\-*、。]+/g, '').trim())
+      .filter((point) => point.length > 0);
+
+    if (bulletPoints.length > 0) {
+      return bulletPoints;
+    }
+  }
+
+  return [normalizeDiaryBodyText(fallbackText).replace(/\s+/g, ' ').trim()];
 }
 
 function normalizeDiaryBodyText(value: string) {

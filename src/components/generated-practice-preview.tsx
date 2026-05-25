@@ -1,19 +1,29 @@
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { FoundationSurface } from '@/components/ui/foundation-surface';
 import { Spacing } from '@/constants/theme';
-import { type TranslationCard } from '@/lib/backend/practice';
+import { type PracticeDraftCard, type TranslationCard } from '@/lib/backend/practice';
+
+type PreviewPracticeCard = PracticeDraftCard | TranslationCard;
 
 type GeneratedPracticePreviewProps = {
-  cards: TranslationCard[];
+  cards: PreviewPracticeCard[];
+  editable?: boolean;
+  onCardJapaneseChange?: (cardId: string, nextJapanese: string) => void;
 };
 
 const FoundationBorderColor = '#111111';
 const FoundationDistance = 0.56;
 
-export function GeneratedPracticePreview({ cards }: GeneratedPracticePreviewProps) {
-  const visibleCards = cards.filter((card) => card.japanese.trim().length > 0);
+export function GeneratedPracticePreview({
+  cards,
+  editable = false,
+  onCardJapaneseChange,
+}: GeneratedPracticePreviewProps) {
+  const visibleCards = editable
+    ? cards
+    : cards.filter((card) => card.japanese.trim().length > 0);
 
   return (
     <View style={styles.container}>
@@ -31,9 +41,22 @@ export function GeneratedPracticePreview({ cards }: GeneratedPracticePreviewProp
             foundationDirection="diagonal"
             foundationColor={FoundationBorderColor}
             style={styles.cardSlip}>
-            <ThemedText style={styles.japaneseText} selectable>
-              {card.japanese}
-            </ThemedText>
+            {editable ? (
+              <TextInput
+                value={card.japanese}
+                accessibilityLabel="日本語カード案を編集"
+                multiline
+                scrollEnabled={false}
+                textAlignVertical="top"
+                selectionColor="#276EF1"
+                onChangeText={(nextJapanese) => onCardJapaneseChange?.(card.id, nextJapanese)}
+                style={styles.japaneseInput}
+              />
+            ) : (
+              <ThemedText style={styles.japaneseText} selectable>
+                {card.japanese}
+              </ThemedText>
+            )}
           </FoundationSurface>
         ))}
       </ScrollView>
@@ -64,6 +87,14 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
   },
   japaneseText: {
+    color: '#111111',
+    fontSize: 22,
+    lineHeight: 32,
+    fontWeight: 900,
+  },
+  japaneseInput: {
+    minHeight: 44,
+    padding: 0,
     color: '#111111',
     fontSize: 22,
     lineHeight: 32,
