@@ -35,7 +35,6 @@ import {
 } from '@/lib/card-learning-statuses';
 import {
   flattenTranslationCardGroups,
-  formatPracticeDate,
   StatusPriority,
   type PracticeCard,
 } from '@/lib/practice-cards';
@@ -873,60 +872,6 @@ const SlackCardFace = memo(function SlackCardFace({
   return (
     <View style={styles.cardFace}>
       <View style={styles.cardContent}>
-        <View style={styles.cardTop}>
-          <View style={styles.cardTopText}>
-            <View style={styles.cardHeader}>
-              <ThemedText style={styles.cardTitle} numberOfLines={2} selectable>
-                {card.diaryExcerpt}
-              </ThemedText>
-            </View>
-
-            <View style={styles.metaRow}>
-              <View style={styles.metaPill}>
-                <SymbolView
-                  name={{
-                    ios: 'calendar',
-                    android: 'calendar_today',
-                    web: 'calendar_today',
-                  }}
-                  size={13}
-                  tintColor={LabColors.subtleText}
-                />
-                <ThemedText style={styles.metaText} numberOfLines={1} selectable>
-                  {formatPracticeDate(card.diaryCreatedAt)}
-                </ThemedText>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.cardTopActionSlot}>
-            {!isPreview && isAnswerVisible ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="英語を読み上げる"
-                hitSlop={8}
-                onPress={handleSpeakPress}
-                style={({ pressed }) => [
-                  styles.soundButton,
-                  {
-                    backgroundColor: isSpeaking ? LabColors.green : LabColors.cardTint,
-                    opacity: pressed ? 0.72 : 1,
-                  },
-                ]}>
-                <SymbolView
-                  name={{
-                    ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
-                    android: 'volume_up',
-                    web: 'volume_up',
-                  }}
-                  size={18}
-                  tintColor={isSpeaking ? LabColors.white : LabColors.text}
-                />
-              </Pressable>
-            ) : null}
-          </View>
-        </View>
-
         <GestureDetector gesture={tapGesture}>
           <View
             accessible={!isPreview}
@@ -943,6 +888,31 @@ const SlackCardFace = memo(function SlackCardFace({
           </View>
         </GestureDetector>
 
+        {!isPreview && isAnswerVisible ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="英語を読み上げる"
+            hitSlop={8}
+            onPress={handleSpeakPress}
+            style={({ pressed }) => [
+              styles.soundButton,
+              styles.soundButtonFloating,
+              {
+                backgroundColor: isSpeaking ? LabColors.green : LabColors.cardTint,
+                opacity: pressed ? 0.72 : 1,
+              },
+            ]}>
+            <SymbolView
+              name={{
+                ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
+                android: 'volume_up',
+                web: 'volume_up',
+              }}
+              size={18}
+              tintColor={isSpeaking ? LabColors.white : LabColors.text}
+            />
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -1218,64 +1188,13 @@ const styles = StyleSheet.create({
   },
   cardContent: {
     flex: 1,
+    position: 'relative',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
-  },
-  cardTop: {
-    minHeight: 72,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
-  cardTopText: {
-    flex: 1,
-    gap: Spacing.two,
-  },
-  cardTopActionSlot: {
-    width: 40,
-    minHeight: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: Spacing.three,
-  },
-  cardTitle: {
-    flex: 1,
-    color: LabColors.text,
-    fontSize: 20,
-    lineHeight: 27,
-    fontWeight: 900,
-  },
-  metaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
-  },
-  metaPill: {
-    maxWidth: '100%',
-    minHeight: 32,
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 16,
-    backgroundColor: LabColors.cardTint,
-    gap: Spacing.one,
-    paddingHorizontal: Spacing.two,
-  },
-  metaText: {
-    flexShrink: 1,
-    color: LabColors.mutedText,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: 700,
   },
   answerTouchArea: {
     flex: 1,
     justifyContent: 'center',
-    paddingTop: Spacing.three,
   },
   promptText: {
     color: LabColors.text,
@@ -1296,6 +1215,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 12,
     borderCurve: 'continuous',
+  },
+  soundButtonFloating: {
+    position: 'absolute',
+    top: Spacing.three,
+    right: Spacing.three,
+    zIndex: 2,
   },
   decisionOverlay: {
     position: 'absolute',

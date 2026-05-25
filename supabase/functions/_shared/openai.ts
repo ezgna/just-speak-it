@@ -53,13 +53,26 @@ export async function createOpenAIJsonResponse<T>({
   }
 
   const payload = await response.json();
+  const incompleteReason = readOpenAIIncompleteReason(payload);
   const outputText = readOpenAIOutputText(payload);
 
   if (!outputText) {
-    throw new Error('OpenAIのJSON出力を読み取れませんでした。');
+    throw new Error(
+      incompleteReason
+        ? `OpenAIのJSON出力が途中で終了しました: ${incompleteReason}`
+        : 'OpenAIのJSON出力を読み取れませんでした。'
+    );
   }
 
-  return JSON.parse(outputText) as T;
+  try {
+    return JSON.parse(outputText) as T;
+  } catch (error) {
+    throw new Error(
+      error instanceof Error
+        ? `OpenAIのJSON出力が壊れていました: ${error.message}`
+        : 'OpenAIのJSON出力が壊れていました。'
+    );
+  }
 }
 
 function readOpenAIOutputText(payload: Record<string, unknown>) {
@@ -90,6 +103,16 @@ function readOpenAIOutputText(payload: Record<string, unknown>) {
   }
 
   return chunks.length > 0 ? chunks.join('') : null;
+}
+
+function readOpenAIIncompleteReason(payload: Record<string, unknown>) {
+  if (!isRecord(payload.incomplete_details)) {
+    return null;
+  }
+
+  return typeof payload.incomplete_details.reason === 'string'
+    ? payload.incomplete_details.reason
+    : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

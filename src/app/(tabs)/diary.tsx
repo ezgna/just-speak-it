@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -18,7 +19,14 @@ import { listDiaryEntries, type DiaryEntry } from '@/lib/backend/practice';
 import { subscribeToPracticeRefresh } from '@/lib/practice-refresh';
 
 type LoadMode = 'initial' | 'refresh' | 'sync';
+type DiaryDisplayMode = 'original' | 'plain' | 'polished';
 const WebTopTabInset = process.env.EXPO_OS === 'web' ? 76 : 0;
+
+const DiaryDisplayModeOptions: { label: string; value: DiaryDisplayMode }[] = [
+  { label: '原文', value: 'original' },
+  { label: 'そのまま', value: 'plain' },
+  { label: '読みやすく', value: 'polished' },
+];
 
 const DiaryColors = {
   accent: '#D85642',
@@ -41,6 +49,7 @@ export default function DiaryScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [queuedSyncVersion, setQueuedSyncVersion] = useState(0);
+  const [displayMode, setDisplayMode] = useState<DiaryDisplayMode>('plain');
 
   const loadEntries = useCallback(async (mode: LoadMode = 'initial') => {
     if (isLoadingEntriesRef.current) {
@@ -193,8 +202,9 @@ export default function DiaryScreen() {
 
         {entries.length > 0 && (
           <View style={styles.diaryPaperList}>
+            <DiaryModeSwitch value={displayMode} onChange={setDisplayMode} />
             {entries.map((entry) => (
-              <DiaryPaper key={entry.id} entry={entry} />
+              <DiaryPaper key={entry.id} entry={entry} displayMode={displayMode} />
             ))}
           </View>
         )}
@@ -203,14 +213,58 @@ export default function DiaryScreen() {
   );
 }
 
-function DiaryPaper({ entry }: { entry: DiaryEntry }) {
+function DiaryModeSwitch({
+  value,
+  onChange,
+}: {
+  value: DiaryDisplayMode;
+  onChange: (value: DiaryDisplayMode) => void;
+}) {
+  return (
+    <View style={styles.modeSwitch} accessibilityRole="radiogroup">
+      {DiaryDisplayModeOptions.map((option, index) => {
+        const isSelected = option.value === value;
+
+        return (
+          <Pressable
+            key={option.value}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: isSelected }}
+            onPress={() => onChange(option.value)}
+            style={({ pressed }) => [
+              styles.modeButton,
+              index > 0 && styles.modeButtonDivider,
+              isSelected && styles.modeButtonSelected,
+              pressed && styles.modeButtonPressed,
+            ]}>
+            <ThemedText
+              style={[
+                styles.modeButtonText,
+                isSelected && styles.modeButtonTextSelected,
+              ]}>
+              {option.label}
+            </ThemedText>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
+function DiaryPaper({
+  entry,
+  displayMode,
+}: {
+  entry: DiaryEntry;
+  displayMode: DiaryDisplayMode;
+}) {
   return (
     <DiaryPaperSurface>
       <ThemedText style={styles.diaryPaperDate} selectable>
         {formatDate(entry.createdAt)}
       </ThemedText>
       <ThemedText style={styles.diaryPaperBody} selectable>
-        {entry.bodyText}
+        {getDiaryDisplayText(entry, displayMode)}
       </ThemedText>
     </DiaryPaperSurface>
   );
@@ -256,6 +310,28 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function getDiaryDisplayText(entry: DiaryEntry, displayMode: DiaryDisplayMode) {
+  if (displayMode === 'original') {
+    return normalizeDisplayText(entry.originalText);
+  }
+
+  if (displayMode === 'polished') {
+    return entry.polishedText;
+  }
+
+  return entry.plainText;
+}
+
+function normalizeDisplayText(value: string) {
+  const normalizedValue = value.replace(/\n{3,}/g, '\n\n').trim();
+
+  if (normalizedValue) {
+    return normalizedValue;
+  }
+
+  return '本文はありません。';
+}
+
 const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
@@ -271,6 +347,43 @@ const styles = StyleSheet.create({
   },
   diaryPaperList: {
     gap: Spacing.three,
+  },
+  modeSwitch: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    overflow: 'hidden',
+    borderRadius: 18,
+    borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: DiaryColors.bodyText,
+    backgroundColor: DiaryColors.paper,
+  },
+  modeButton: {
+    minHeight: 44,
+    minWidth: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  modeButtonDivider: {
+    borderLeftWidth: 4,
+    borderLeftColor: DiaryColors.bodyText,
+  },
+  modeButtonSelected: {
+    backgroundColor: DiaryColors.bodyText,
+  },
+  modeButtonPressed: {
+    opacity: 0.72,
+  },
+  modeButtonText: {
+    color: DiaryColors.bodyText,
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: 900,
+  },
+  modeButtonTextSelected: {
+    color: DiaryColors.paper,
   },
   diaryPaperSurface: {
     alignSelf: 'stretch',

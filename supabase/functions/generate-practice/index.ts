@@ -10,7 +10,7 @@ type GenerationMode = 'natural' | 'compact';
 type PracticeGenerationStatus = 'processing' | 'completed' | 'failed';
 
 type GeneratePracticeOutput = {
-  diaryText: string;
+  polishedText: string;
   cards: TranslationCard[];
 };
 
@@ -18,8 +18,9 @@ type DiaryEntryRow = {
   id: string;
   user_id: string;
   source: 'text' | 'voice';
-  raw_transcript_text: string;
-  body_text: string;
+  original_text: string;
+  plain_text: string;
+  polished_text: string;
   content_hash: string;
   created_at: string;
   updated_at: string;
@@ -54,9 +55,9 @@ type GenerationClaim =
 const translationCardSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['diaryText', 'cards'],
+  required: ['polishedText', 'cards'],
   properties: {
-    diaryText: {
+    polishedText: {
       type: 'string',
     },
     cards: {
@@ -76,7 +77,7 @@ const translationCardSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, raw_transcript_text, body_text, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, polished_text, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
 const translationCardSelect = 'id, practice_generation_id, sort_order, japanese, english, created_at';
@@ -102,32 +103,32 @@ export default {
 
     const generationContext = { supabase: context.supabase as any };
     const body = await req.json().catch(() => null);
-    const cleanedText =
+    const plainText =
       typeof body?.cleanedText === 'string' && body.cleanedText.trim()
         ? body.cleanedText.trim()
         : typeof body?.diaryText === 'string'
           ? body.diaryText.trim()
           : '';
-    const rawTranscriptText =
+    const originalText =
       typeof body?.rawTranscriptText === 'string' && body.rawTranscriptText.trim()
         ? body.rawTranscriptText.trim()
         : typeof body?.transcriptText === 'string' && body.transcriptText.trim()
           ? body.transcriptText.trim()
-          : cleanedText;
+          : plainText;
 
-    if (!cleanedText) {
+    if (!plainText) {
       return errorResponse('日記本文が必要です。');
     }
 
     const source = body?.source === 'text' ? 'text' : 'voice';
     const generationMode = parseGenerationMode(body?.generationMode);
-    const contentHash = await createContentHash(cleanedText);
+    const contentHash = await createContentHash(plainText);
     const generationClaim = await claimGeneration(generationContext, {
       userId,
       source,
       generationMode,
-      rawTranscriptText,
-      cleanedText,
+      originalText,
+      plainText,
       contentHash,
     });
 
@@ -154,21 +155,28 @@ export default {
     const claimedDiaryEntry = generationClaim.diaryEntry;
     const claimedPracticeGeneration = generationClaim.practiceGeneration;
 
-    const output = await createOpenAIJsonResponse<GeneratePracticeOutput>({
-      schemaName: 'daily_to_english_translation_cards',
-      schema: translationCardSchema,
-      instructions: createPracticeInstructions(generationMode),
-      input: cleanedText,
-      maxOutputTokens: 2400,
-    }).catch(async (error) => {
+    let output: GeneratePracticeOutput;
+
+    try {
+      output = await createOpenAIJsonResponse<GeneratePracticeOutput>({
+        schemaName: 'daily_to_english_translation_cards',
+        schema: translationCardSchema,
+        instructions: createPracticeInstructions(generationMode),
+        input: plainText,
+        maxOutputTokens: 6000,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : '英語カードの生成に失敗しました。';
       await markGenerationFailed(
         generationContext,
         claimedPracticeGeneration.id,
-        error instanceof Error ? error.message : '英語カードの生成に失敗しました。'
+        message
       );
-      throw error;
-    });
-    const bodyText = normalizeDiaryText(output.diaryText, cleanedText);
+      return errorResponse(message, 502);
+    }
+
+    const polishedText = normalizeDiaryText(output.polishedText, plainText);
 
     const cardDrafts = output.cards
       .map((card, index) => ({
@@ -191,8 +199,9 @@ export default {
       .from('diary_entries')
       .update({
         source,
-        raw_transcript_text: rawTranscriptText,
-        body_text: bodyText,
+        original_text: originalText,
+        plain_text: plainText,
+        polished_text: polishedText,
       })
       .eq('id', claimedDiaryEntry.id)
       .select(diaryEntrySelect)
@@ -262,23 +271,23 @@ async function claimGeneration(
     userId,
     source,
     generationMode,
-    rawTranscriptText,
-    cleanedText,
+    originalText,
+    plainText,
     contentHash,
   }: {
     userId: string;
     source: 'text' | 'voice';
     generationMode: GenerationMode;
-    rawTranscriptText: string;
-    cleanedText: string;
+    originalText: string;
+    plainText: string;
     contentHash: string;
   }
 ): Promise<GenerationClaim> {
   const diaryEntryClaim = await getOrCreateDiaryEntry(context, {
     userId,
     source,
-    rawTranscriptText,
-    cleanedText,
+    originalText,
+    plainText,
     contentHash,
   });
 
@@ -318,14 +327,14 @@ async function getOrCreateDiaryEntry(
   {
     userId,
     source,
-    rawTranscriptText,
-    cleanedText,
+    originalText,
+    plainText,
     contentHash,
   }: {
     userId: string;
     source: 'text' | 'voice';
-    rawTranscriptText: string;
-    cleanedText: string;
+    originalText: string;
+    plainText: string;
     contentHash: string;
   }
 ) {
@@ -334,8 +343,9 @@ async function getOrCreateDiaryEntry(
     .insert({
       user_id: userId,
       source,
-      raw_transcript_text: rawTranscriptText,
-      body_text: cleanedText,
+      original_text: originalText,
+      plain_text: plainText,
+      polished_text: plainText,
       content_hash: contentHash,
     })
     .select(diaryEntrySelect)
@@ -641,10 +651,17 @@ function createPracticeInstructions(generationMode: GenerationMode) {
   const commonInstructions = [
     'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
     '入力は日本語の文字起こし、またはそれを軽く整えた文章です。',
-    'diaryText は日記タブにそのまま全文表示する日本語本文です。',
-    'diaryText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
-    'diaryText は話者の事実と温度感を保ったまま、読める日記文として句読点と文の流れだけを整えてください。',
-    '意味を足さないでください。削りすぎないでください。短い入力は短い日記文のままで構いません。',
+    'polishedText は日記タブの「読みやすく」表示にそのまま出す日本語本文です。',
+    'polishedText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
+    'polishedText は入力をそのまま長く整えるのではなく、適度に簡潔な日記文にしてください。',
+    '同じ気持ちや状況を繰り返している部分、意味の薄い補足、口癖、言い直しは削ってください。',
+    '元の出来事、感情、温度感、主観の芯は保ってください。',
+    '事実、理由、感情を新しく足さないでください。必要な意味まで削りすぎないでください。',
+    '長い入力は、主な出来事と感情が伝わる程度に自然に圧縮してください。目安は入力の半分から7割程度です。',
+    '短い入力は無理に短くしなくて構いません。',
+    '句読点と文の区切りを補い、読み返しやすい日記文にしてください。',
+    'ただし、要約文、作文、エッセイ、説明文のようにしないでください。',
+    'その人が自分で書いた日記に見える自然さを優先してください。',
     'そのうえで、英語ならどこまでを一文にするのが自然かを逆算してください。',
     '日本語の句点や話し言葉の切れ目に引きずられず、英語ネイティブが自然に言う一文ごとのカードに分けてください。',
     '各カードは japanese と english の一対一にしてください。',
@@ -678,8 +695,9 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     id: diaryEntry.id,
     user_id: diaryEntry.user_id,
     source: diaryEntry.source,
-    raw_transcript_text: diaryEntry.raw_transcript_text,
-    body_text: diaryEntry.body_text,
+    original_text: diaryEntry.original_text,
+    plain_text: diaryEntry.plain_text,
+    polished_text: diaryEntry.polished_text,
     created_at: diaryEntry.created_at,
   };
 }

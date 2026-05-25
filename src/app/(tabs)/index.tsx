@@ -5,22 +5,27 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
-import { useRef, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useRef, useState } from 'react';
 import { Alert, Keyboard, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/daily-to-english-ui';
+import { GeneratedPracticePreview } from '@/components/generated-practice-preview';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideTextInput } from '@/components/ui/glide-text-input';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useGenerationMode } from '@/hooks/use-generation-mode';
-import { generatePracticeFromDiary } from '@/lib/backend/practice';
+import { generatePracticeFromDiary, type TranslationCard } from '@/lib/backend/practice';
 import { setHapticsAllowedDuringRecording } from '@/lib/audio-session-haptics';
 import { notifyPracticeChanged } from '@/lib/practice-refresh';
 import { transcribeRecording } from '@/lib/backend/transcription';
 
 type DiaryDraftSource = 'text' | 'voice';
+
+const DraftInputMaxHeight = 264;
+const DraftInputFrameMaxHeight = 320;
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -41,7 +46,9 @@ export default function HomeScreen() {
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [hasSavedCurrentDraft, setHasSavedCurrentDraft] = useState(false);
+  const [generatedPracticeCards, setGeneratedPracticeCards] = useState<TranslationCard[]>([]);
   const generationInFlightRef = useRef(false);
+  const resetDraftOnBlurRef = useRef(false);
 
   const isRecordingButtonActive = recorderState.isRecording || isStoppingRecording;
   const isWritingButtonActive = !isRecordingButtonActive && (isTranscribing || isGeneratingCards);
@@ -57,8 +64,38 @@ export default function HomeScreen() {
   const isDraftInputEditable =
     !recorderState.isRecording && !isWorking;
   const hasDraftText = diaryDraftText.trim().length > 0;
+  const hasGeneratedPracticeCards = generatedPracticeCards.length > 0;
   const shouldShowMakeCardsAction =
     hasDraftText && !hasSavedCurrentDraft && !isRecordingButtonActive && !isWritingButtonActive;
+  const shouldShowReviewAction =
+    hasDraftText &&
+    hasSavedCurrentDraft &&
+    hasGeneratedPracticeCards &&
+    !isRecordingButtonActive &&
+    !isWritingButtonActive;
+
+  const resetDraftState = useCallback(() => {
+    setDiaryDraftText('');
+    setDiaryDraftSource('text');
+    setRawTranscriptText(null);
+    setTranscriptionError(null);
+    setGenerationError(null);
+    setHasSavedCurrentDraft(false);
+    setGeneratedPracticeCards([]);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (!resetDraftOnBlurRef.current) {
+          return;
+        }
+
+        resetDraftOnBlurRef.current = false;
+        resetDraftState();
+      };
+    }, [resetDraftState])
+  );
 
   async function startRecording() {
     setIsRecordingBusy(true);
@@ -87,6 +124,7 @@ export default function HomeScreen() {
       setDiaryDraftSource('voice');
       setRawTranscriptText(null);
       setHasSavedCurrentDraft(false);
+      setGeneratedPracticeCards([]);
     } catch (error) {
       setRecordingIntentActive(false);
       void setRecordingHapticsAllowed(false);
@@ -149,6 +187,7 @@ export default function HomeScreen() {
       setRawTranscriptText(cleanedText ? transcript.rawText : null);
       setDiaryDraftText(cleanedText);
       setDiaryDraftSource(cleanedText ? 'voice' : 'text');
+      setGeneratedPracticeCards([]);
     } catch (error) {
       setTranscriptionError(
         error instanceof Error ? error.message : '音声の読み取りに失敗しました。'
@@ -175,9 +214,10 @@ export default function HomeScreen() {
     setIsGeneratingCards(true);
     setGenerationError(null);
     setHasSavedCurrentDraft(false);
+    setGeneratedPracticeCards([]);
 
     try {
-      await generatePracticeFromDiary({
+      const practice = await generatePracticeFromDiary({
         diaryText,
         source: diaryDraftSource,
         cleanedText: diaryText,
@@ -185,6 +225,7 @@ export default function HomeScreen() {
           diaryDraftSource === 'voice' ? rawTranscriptText ?? diaryText : diaryText,
         generationMode,
       });
+      setGeneratedPracticeCards(practice.cards);
       setHasSavedCurrentDraft(true);
       notifyPracticeChanged();
     } catch (error) {
@@ -206,6 +247,12 @@ export default function HomeScreen() {
       return;
     }
 
+    if (shouldShowReviewAction) {
+      resetDraftOnBlurRef.current = true;
+      router.push('/flashcards');
+      return;
+    }
+
     if (hasDraftText && !hasSavedCurrentDraft) {
       await handleGenerateCards();
       return;
@@ -224,29 +271,22 @@ export default function HomeScreen() {
     setTranscriptionError(null);
     setGenerationError(null);
     setHasSavedCurrentDraft(false);
+    setGeneratedPracticeCards([]);
   }
 
-  return (
-    <View
-      style={[
-        styles.screen,
-        {
-          backgroundColor: palette.background,
-          paddingTop: safeAreaInsets.top,
-          paddingBottom: safeAreaInsets.bottom + Spacing.three,
-          paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
-          paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
-        },
-      ]}>
-      <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
-        <View style={styles.contentArea}>
-          <View style={styles.draftStack}>
-            {transcriptionError && (
-              <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
-                {transcriptionError}
-              </ThemedText>
-            )}
+  const contentArea = (
+    <View style={styles.contentArea}>
+      <View style={styles.draftStack}>
+        {transcriptionError && (
+          <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
+            {transcriptionError}
+          </ThemedText>
+        )}
 
+        {shouldShowReviewAction ? (
+          <GeneratedPracticePreview cards={generatedPracticeCards} />
+        ) : (
+          <View style={styles.inputDismissArea}>
             <GlideTextInput
               value={diaryDraftText}
               tone="cream"
@@ -263,15 +303,37 @@ export default function HomeScreen() {
               ]}
               onChangeText={handleDraftTextChange}
             />
-
-            {generationError && (
-              <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
-                {generationError}
-              </ThemedText>
-            )}
           </View>
-        </View>
-      </TouchableWithoutFeedback>
+        )}
+
+        {generationError && (
+          <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
+            {generationError}
+          </ThemedText>
+        )}
+      </View>
+    </View>
+  );
+
+  return (
+    <View
+      style={[
+        styles.screen,
+        {
+          backgroundColor: palette.background,
+          paddingTop: safeAreaInsets.top,
+          paddingBottom: safeAreaInsets.bottom + Spacing.three,
+          paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+          paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
+        },
+      ]}>
+      {shouldShowReviewAction ? (
+        contentArea
+      ) : (
+        <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+          {contentArea}
+        </TouchableWithoutFeedback>
+      )}
 
       <View style={styles.buttonDock}>
         <GlideButton
@@ -280,23 +342,29 @@ export default function HomeScreen() {
               ? 'Making it'
               : isRecordingButtonActive
                 ? recordingButtonDurationLabel
-                : shouldShowMakeCardsAction
-                  ? 'Make cards'
-                  : 'Speak it'
+                : shouldShowReviewAction
+                  ? 'Review it'
+                  : shouldShowMakeCardsAction
+                    ? 'Make cards'
+                    : 'Speak it'
           }
           accessibilityLabel={
             isRecordingButtonActive
               ? `録音を停止 ${recordingButtonDurationLabel}`
-              : shouldShowMakeCardsAction
-                ? '英語カードを作る'
-              : undefined
+              : shouldShowReviewAction
+                ? '作った英語カードを復習する'
+                : shouldShowMakeCardsAction
+                  ? '英語カードを作る'
+                  : undefined
           }
           icon={
             isRecordingButtonActive
               ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
-              : shouldShowMakeCardsAction
-                ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
-                : { ios: 'mic.fill', android: 'mic', web: 'mic' }
+              : shouldShowReviewAction
+                ? { ios: 'rectangle.stack.fill', android: 'layers', web: 'layers' }
+                : shouldShowMakeCardsAction
+                  ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
+                  : { ios: 'mic.fill', android: 'mic', web: 'mic' }
           }
           busy={isWritingButtonActive}
           tone={
@@ -304,9 +372,11 @@ export default function HomeScreen() {
               ? 'aqua'
               : isRecordingButtonActive
                 ? 'orange'
-                : shouldShowMakeCardsAction
-                  ? 'blue'
-                  : 'mint'
+                : shouldShowReviewAction
+                  ? 'grape'
+                  : shouldShowMakeCardsAction
+                    ? 'blue'
+                    : 'mint'
           }
           size="large"
           disabled={isRecordingButtonDisabled}
@@ -346,14 +416,20 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.one,
   },
   draftStack: {
+    flex: 1,
     width: '100%',
     gap: Spacing.three,
   },
+  inputDismissArea: {
+    width: '100%',
+  },
   draftInputFrame: {
     minHeight: 220,
+    maxHeight: DraftInputFrameMaxHeight,
   },
   draftInput: {
     minHeight: 160,
+    maxHeight: DraftInputMaxHeight,
     padding: 0,
     fontSize: 20,
     lineHeight: 31,

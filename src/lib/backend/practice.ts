@@ -34,23 +34,25 @@ type TranslationCardRow = {
 export type DiaryEntry = {
   id: string;
   source: 'text' | 'voice';
-  bodyText: string;
-  rawTranscriptText: string;
+  originalText: string;
+  plainText: string;
+  polishedText: string;
   createdAt: string;
 };
 
 type DiaryEntryRow = {
   id: string;
   source: 'text' | 'voice';
-  raw_transcript_text: string;
-  body_text: string;
+  original_text: string;
+  plain_text: string;
+  polished_text: string;
   created_at: string;
 };
 
 type DiaryEntryGroupRow = {
   id: string;
   source: 'text' | 'voice';
-  body_text: string;
+  plain_text: string;
   created_at: string;
 };
 
@@ -73,8 +75,9 @@ export type GeneratePracticeResponse = {
   diaryEntry: {
     id: string;
     source: 'text' | 'voice';
-    raw_transcript_text: string;
-    body_text: string;
+    original_text: string;
+    plain_text: string;
+    polished_text: string;
     created_at: string;
   };
   cards: TranslationCardRow[];
@@ -131,7 +134,7 @@ export async function listDiaryEntries() {
   const supabase = requireSupabaseClient();
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
-    .select('id, source, raw_transcript_text, body_text, created_at')
+    .select('id, source, original_text, plain_text, polished_text, created_at')
     .order('created_at', { ascending: false });
 
   if (entriesError) {
@@ -141,8 +144,9 @@ export async function listDiaryEntries() {
   return ((entries ?? []) as DiaryEntryRow[]).map((entry) => ({
     id: entry.id,
     source: entry.source,
-    bodyText: normalizeDiaryBodyText(entry.body_text),
-    rawTranscriptText: entry.raw_transcript_text,
+    originalText: entry.original_text,
+    plainText: normalizeDiaryBodyText(entry.plain_text),
+    polishedText: normalizeDiaryBodyText(entry.polished_text),
     createdAt: entry.created_at,
   }));
 }
@@ -174,7 +178,7 @@ export async function listTranslationCardGroups() {
 
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
-    .select('id, source, body_text, created_at')
+    .select('id, source, plain_text, created_at')
     .in('id', diaryEntryIds);
 
   if (entriesError) {
@@ -218,8 +222,8 @@ export async function listTranslationCardGroups() {
         generationMode: generation.generation_mode,
         practiceGenerationId: generation.id,
         source: entry.source,
-        diaryText: normalizeDiaryBodyText(entry.body_text),
-        diaryExcerpt: createDiaryExcerpt(entry.body_text),
+        diaryText: normalizeDiaryBodyText(entry.plain_text),
+        diaryExcerpt: createDiaryExcerpt(entry.plain_text),
         createdAt: entry.created_at,
         cards,
       };

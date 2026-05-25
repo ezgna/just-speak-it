@@ -32,6 +32,7 @@ export function GlideTextInput({
   inputStyle,
   placeholderTextColor,
   multiline = true,
+  scrollEnabled = multiline,
   textAlignVertical = 'top',
   editable = true,
   ...props
@@ -68,6 +69,7 @@ export function GlideTextInput({
         {...props}
         editable={editable}
         multiline={multiline}
+        scrollEnabled={scrollEnabled}
         textAlignVertical={textAlignVertical}
         placeholderTextColor={resolvedPlaceholderColor}
         selectionColor={accentStyle.backgroundColor}
