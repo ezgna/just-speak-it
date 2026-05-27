@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useDailyPalette } from '@/components/daily-to-english-ui';
+import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { ThemedText } from '@/components/themed-text';
 import { FoundationSurface } from '@/components/ui/foundation-surface';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';

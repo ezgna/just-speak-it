@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GenerationModeSelector } from '@/components/generation-mode-selector';
-import { useDailyPalette } from '@/components/daily-to-english-ui';
+import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { ThemePreferenceSelector } from '@/components/theme-preference-selector';
 import { GlideButton } from '@/components/ui/glide-button';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';

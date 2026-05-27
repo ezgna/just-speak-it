@@ -10,7 +10,7 @@ export type CardLearningProgress = {
 };
 export type CardLearningProgresses = Record<string, CardLearningProgress>;
 
-const CardStatusStorageKey = 'daily-to-english:card-statuses:v1';
+const CardStatusStorageKey = 'just-speak-it:card-statuses:v1';
 const LearningRetryDays = 1;
 const SuccessReviewIntervalsInDays = [3, 7, 14, 30, 60];
 const DayInMilliseconds = 24 * 60 * 60 * 1000;

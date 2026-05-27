@@ -1,7 +1,7 @@
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useDailyPalette } from '@/components/daily-to-english-ui';
+import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { EnglishPracticeDeck } from '@/components/english-practice-deck';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
