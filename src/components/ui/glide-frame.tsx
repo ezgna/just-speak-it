@@ -20,7 +20,7 @@ export type GlideTone =
   | 'orange'
   | 'aqua'
   | 'grape';
-export type GlideSize = 'extraLarge' | 'large' | 'medium' | 'compact';
+export type GlideSize = 'large' | 'medium' | 'compact';
 
 export const GlideFoundationDistance = 0.56;
 export const GlideFoundationColor = '#111111';
@@ -111,14 +111,6 @@ export const GlideSizeMetrics: Record<
     paddingVertical: number;
   }
 > = {
-  extraLarge: {
-    borderRadius: 20,
-    borderWidth: 4,
-    foundationDepth: 10,
-    minHeight: 140,
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-  },
   large: {
     borderRadius: 12,
     borderWidth: 4,

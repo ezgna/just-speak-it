@@ -33,6 +33,7 @@ function RootNavigator() {
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="design-lab" options={{ title: '実験室' }} />
+        <Stack.Screen name="prototype-room" options={{ title: '試作室' }} />
         <Stack.Screen name="workbench" options={{ title: 'ワークベンチ' }} />
       </Stack>
     </ThemeProvider>

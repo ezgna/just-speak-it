@@ -2,7 +2,8 @@ import { StyleSheet, TextInput, View, type StyleProp, type TextInputProps, type 
 
 import { ThemedText } from '@/components/themed-text';
 import {
-  GlideFrame,
+  GlideFoundationColor,
+  GlideSizeMetrics,
   GlideTones,
   getGlideRgba,
   type GlideSize,
@@ -14,6 +15,8 @@ type GlideTextInputProps = Omit<TextInputProps, 'style'> & {
   tone?: GlideTone;
   accentTone?: GlideTone;
   size?: GlideSize;
+  variant?: 'surface' | 'canvas';
+  canvasCornerColor?: string;
   fullWidth?: boolean;
   meta?: string;
   containerStyle?: StyleProp<ViewStyle>;
@@ -25,6 +28,8 @@ export function GlideTextInput({
   tone = 'cream',
   accentTone = 'mint',
   size = 'large',
+  variant = 'surface',
+  canvasCornerColor = GlideFoundationColor,
   fullWidth = true,
   meta,
   containerStyle,
@@ -39,50 +44,91 @@ export function GlideTextInput({
 }: GlideTextInputProps) {
   const toneStyle = GlideTones[tone];
   const accentStyle = GlideTones[accentTone];
+  const sizeMetrics = GlideSizeMetrics[size];
   const resolvedPlaceholderColor =
     placeholderTextColor ?? getGlideRgba(toneStyle.textColor, 0.58);
+  const isCanvas = variant === 'canvas';
 
   return (
-    <GlideFrame
-      tone={tone}
-      size={size}
-      fullWidth={fullWidth}
-      containerStyle={containerStyle}
-      style={[meta && size === 'large' ? styles.largeFrameWithMeta : null, frameStyle]}
-      accessibilityRole="text">
-      {meta ? (
-        <View style={styles.metaRow}>
-          <View
-            style={[
-              styles.accentRail,
-              {
-                backgroundColor: accentStyle.backgroundColor,
-              },
-            ]}
-          />
-          <ThemedText style={[styles.metaText, { color: toneStyle.textColor }]}>
-            {meta}
-          </ThemedText>
-        </View>
-      ) : null}
-      <TextInput
-        {...props}
-        editable={editable}
-        multiline={multiline}
-        scrollEnabled={scrollEnabled}
-        textAlignVertical={textAlignVertical}
-        placeholderTextColor={resolvedPlaceholderColor}
-        selectionColor={accentStyle.backgroundColor}
+    <View
+      style={[
+        {
+          alignSelf: fullWidth ? 'stretch' : 'flex-start',
+        },
+        containerStyle,
+      ]}>
+      <View
         style={[
-          styles.input,
+          isCanvas
+            ? styles.canvasFrame
+            : {
+                borderRadius: sizeMetrics.borderRadius,
+                borderWidth: sizeMetrics.borderWidth,
+                borderColor: GlideFoundationColor,
+                backgroundColor: toneStyle.backgroundColor,
+                paddingHorizontal: sizeMetrics.paddingHorizontal,
+                paddingVertical: sizeMetrics.paddingVertical,
+              },
           {
-            color: toneStyle.textColor,
-            opacity: editable ? 1 : 0.92,
+            width: fullWidth ? '100%' : undefined,
+            alignSelf: fullWidth ? 'stretch' : 'flex-start',
+            minHeight: sizeMetrics.minHeight,
           },
-          inputStyle,
-        ]}
-      />
-    </GlideFrame>
+          meta && size === 'large' ? styles.largeFrameWithMeta : null,
+          frameStyle,
+        ]}>
+        {isCanvas ? (
+          <>
+            <View
+              style={[
+                styles.canvasCorner,
+                styles.canvasCornerTop,
+                { borderColor: canvasCornerColor },
+              ]}
+            />
+            <View
+              style={[
+                styles.canvasCorner,
+                styles.canvasCornerBottom,
+                { borderColor: canvasCornerColor },
+              ]}
+            />
+          </>
+        ) : null}
+        {meta ? (
+          <View style={styles.metaRow}>
+            <View
+              style={[
+                styles.accentRail,
+                {
+                  backgroundColor: accentStyle.backgroundColor,
+                },
+              ]}
+            />
+            <ThemedText style={[styles.metaText, { color: toneStyle.textColor }]}>
+              {meta}
+            </ThemedText>
+          </View>
+        ) : null}
+        <TextInput
+          {...props}
+          editable={editable}
+          multiline={multiline}
+          scrollEnabled={scrollEnabled}
+          textAlignVertical={textAlignVertical}
+          placeholderTextColor={resolvedPlaceholderColor}
+          selectionColor={accentStyle.backgroundColor}
+          style={[
+            isCanvas ? styles.canvasInput : styles.input,
+            {
+              color: toneStyle.textColor,
+              opacity: editable ? 1 : 0.92,
+            },
+            inputStyle,
+          ]}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -110,6 +156,35 @@ const styles = StyleSheet.create({
   input: {
     minHeight: 116,
     padding: 0,
+  },
+  canvasFrame: {
+    position: 'relative',
+    justifyContent: 'center',
+    padding: Spacing.four,
+  },
+  canvasCorner: {
+    position: 'absolute',
+    width: 34,
+    height: 34,
+  },
+  canvasCornerTop: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 4,
+    borderLeftWidth: 4,
+  },
+  canvasCornerBottom: {
+    right: 0,
+    bottom: 0,
+    borderRightWidth: 4,
+    borderBottomWidth: 4,
+  },
+  canvasInput: {
+    minHeight: 0,
+    padding: 0,
+    fontSize: 21,
+    lineHeight: 32,
+    fontWeight: 800,
   },
   largeFrameWithMeta: {
     paddingVertical: 11,

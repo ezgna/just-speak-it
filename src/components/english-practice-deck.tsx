@@ -1,7 +1,7 @@
-import { StyleSheet, useWindowDimensions, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
+import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { ThemedText } from '@/components/themed-text';
-import { FoundationSurface } from '@/components/ui/foundation-surface';
 import { Spacing } from '@/constants/theme';
 import type { TranslationCardGroup } from '@/lib/backend/practice';
 import { flattenTranslationCardGroups, type PracticeCard } from '@/lib/practice-cards';
@@ -10,104 +10,108 @@ type EnglishPracticeDeckProps = {
   groups: TranslationCardGroup[];
 };
 
-const FoundationBorderColor = '#111111';
-const FoundationDistance = 0.56;
+const InkColor = '#111111';
+const TimecodeColors = ['#2FDD6C', '#65D7F2', '#FF9F45', '#9B7CFF'] as const;
 
 export function EnglishPracticeDeck({ groups }: EnglishPracticeDeckProps) {
-  const { width } = useWindowDimensions();
-  const isWideLayout = width >= 760;
   const cards = flattenTranslationCardGroups(groups);
 
   return (
-    <View style={styles.deckGrid}>
-      {cards.map((card) => (
-        <EnglishPracticePair
+    <View style={styles.transcriptList}>
+      {cards.map((card, index) => (
+        <EnglishPracticeLine
           key={card.id}
           card={card}
-          isWideLayout={isWideLayout}
+          index={index}
         />
       ))}
     </View>
   );
 }
 
-function EnglishPracticePair({
+function EnglishPracticeLine({
   card,
-  isWideLayout,
+  index,
 }: {
   card: PracticeCard;
-  isWideLayout: boolean;
+  index: number;
 }) {
+  const palette = useDailyPalette();
+  const tabColor = TimecodeColors[index % TimecodeColors.length];
+
   return (
-    <FoundationSurface
-      accessibilityRole="summary"
-      containerStyle={[
-        styles.practiceCardContainer,
-        {
-          width: isWideLayout ? '48.5%' : '100%',
-        },
-      ]}
-      foundationDepth={7}
-      foundationDistanceScale={FoundationDistance}
-      foundationDirection="diagonal"
-      foundationColor={FoundationBorderColor}
-      style={styles.practiceCard}>
-      <View style={styles.japanesePanel}>
-        <ThemedText style={styles.japaneseText} selectable>
-          {card.japanese}
-        </ThemedText>
-      </View>
+    <View style={styles.transcriptRow}>
+      {index > 0 ? (
+        <View style={styles.separator}>
+          <View style={[styles.timecodeTab, { backgroundColor: tabColor }]}>
+            <ThemedText style={styles.timecodeText}>{formatTranscriptTime(index)}</ThemedText>
+          </View>
+          <View style={[styles.rule, { backgroundColor: palette.border }]} />
+        </View>
+      ) : null}
 
-      <View style={styles.cardDivider} />
-
-      <View style={styles.englishPanel}>
+      <View style={styles.copy}>
         <ThemedText style={styles.englishText} selectable>
           {card.english}
         </ThemedText>
+        <ThemedText style={[styles.japaneseText, { color: palette.muted }]} selectable>
+          {card.japanese}
+        </ThemedText>
       </View>
-    </FoundationSurface>
+    </View>
   );
 }
 
+function formatTranscriptTime(index: number) {
+  const totalSeconds = index + 1;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 const styles = StyleSheet.create({
-  deckGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: Spacing.four,
+  transcriptList: {
+    gap: Spacing.three,
   },
-  practiceCardContainer: {
-    flexShrink: 0,
-  },
-  practiceCard: {
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    borderWidth: 3,
-    borderColor: FoundationBorderColor,
-    backgroundColor: '#FFF9EC',
-    padding: Spacing.two,
+  transcriptRow: {
     gap: Spacing.two,
   },
-  japanesePanel: {
-    padding: Spacing.two,
+  separator: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  cardDivider: {
+  timecodeTab: {
+    minWidth: 56,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: InkColor,
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.one,
+  },
+  timecodeText: {
+    color: InkColor,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: 900,
+    fontVariant: ['tabular-nums'],
+  },
+  rule: {
+    flex: 1,
     height: 3,
     borderRadius: 999,
-    backgroundColor: FoundationBorderColor,
   },
-  englishPanel: {
-    padding: Spacing.two,
-  },
-  japaneseText: {
-    color: '#111111',
-    fontSize: 21,
-    lineHeight: 31,
-    fontWeight: 900,
+  copy: {
+    gap: Spacing.one,
   },
   englishText: {
-    color: '#111111',
-    fontSize: 22,
-    lineHeight: 32,
+    fontSize: 20,
+    lineHeight: 30,
     fontWeight: 900,
+  },
+  japaneseText: {
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: 700,
   },
 });

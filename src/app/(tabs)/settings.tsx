@@ -1,25 +1,4 @@
-import {
-  Button as SwiftButton,
-  HStack as SwiftHStack,
-  Host as SwiftHost,
-  Image as SwiftImage,
-  Text as SwiftText,
-  ZStack as SwiftZStack,
-} from '@expo/ui/swift-ui';
-import {
-  accessibilityLabel,
-  animation,
-  Animation,
-  buttonStyle,
-  controlSize,
-  frame,
-  opacity,
-  padding,
-  tint,
-} from '@expo/ui/swift-ui/modifiers';
-import * as Haptics from 'expo-haptics';
 import { router } from 'expo-router';
-import { useState } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,15 +7,10 @@ import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { ThemePreferenceSelector } from '@/components/theme-preference-selector';
 import { GlideButton } from '@/components/ui/glide-button';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
-import { useResolvedColorScheme } from '@/hooks/use-theme-preference';
-
-const MemoStackerCopyAccent = '#276EF1';
-const fadeButtonStateAnimation = Animation.easeInOut({ duration: 0.16 });
 
 export default function SettingsScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const palette = useDailyPalette();
-  const colorScheme = useResolvedColorScheme();
 
   return (
     <ScrollView
@@ -70,51 +44,21 @@ export default function SettingsScreen() {
               size="medium"
               onPress={() => router.push('/workbench')}
             />
+            <GlideButton
+              label="試作室"
+              caption="prototype room"
+              icon={{ ios: 'hammer.fill', android: 'construction', web: 'construction' }}
+              tone="orange"
+              size="medium"
+              onPress={() => router.push('/prototype-room')}
+            />
           </View>
         ) : null}
 
         <ThemePreferenceSelector />
         <GenerationModeSelector />
-        <View style={styles.copyButtonDock}>
-          <MemoStackerCopyButton colorScheme={colorScheme} />
-        </View>
       </View>
     </ScrollView>
-  );
-}
-
-function MemoStackerCopyButton({ colorScheme }: { colorScheme: 'dark' | 'light' }) {
-  const [isCopied, setIsCopied] = useState(false);
-
-  function handleCopyPress() {
-    setIsCopied(true);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
-  }
-
-  return (
-    <SwiftHost matchContents colorScheme={colorScheme}>
-      <SwiftButton
-        onPress={handleCopyPress}
-        modifiers={[
-          accessibilityLabel(isCopied ? '完了' : 'コピー'),
-          frame({ minWidth: 140, minHeight: 44 }),
-          padding({ top: 0, bottom: 0, leading: 18, trailing: 18 }),
-          controlSize('large'),
-          buttonStyle('glassProminent'),
-          tint(MemoStackerCopyAccent),
-        ]}>
-        <SwiftZStack modifiers={[animation(fadeButtonStateAnimation, isCopied)]}>
-          <SwiftHStack spacing={6} modifiers={[opacity(isCopied ? 0 : 1)]}>
-            <SwiftImage systemName="doc.on.doc" size={15} />
-            <SwiftText>コピー</SwiftText>
-          </SwiftHStack>
-          <SwiftHStack spacing={6} modifiers={[opacity(isCopied ? 1 : 0)]}>
-            <SwiftImage systemName="checkmark" size={15} />
-            <SwiftText>完了</SwiftText>
-          </SwiftHStack>
-        </SwiftZStack>
-      </SwiftButton>
-    </SwiftHost>
   );
 }
 
@@ -133,8 +77,5 @@ const styles = StyleSheet.create({
   },
   labButtons: {
     gap: Spacing.two,
-  },
-  copyButtonDock: {
-    alignItems: 'center',
   },
 });

@@ -2,7 +2,7 @@ import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
-import { FoundationSurface } from '@/components/ui/foundation-surface';
+import { GlideOptionSurface } from '@/components/ui/glide-option-surface';
 import { Spacing } from '@/constants/theme';
 import {
   type ThemePreference,
@@ -84,16 +84,12 @@ export function ThemePreferenceSelector() {
           const textColor = isSelected ? option.activeTextColor : SelectorColors.ink;
 
           return (
-            <FoundationSurface
+            <GlideOptionSurface
               key={option.value}
               accessibilityRole="radio"
               accessibilityState={{ checked: isSelected }}
               onPress={() => setThemePreference(option.value)}
-              haptic="selection"
-              foundationDepth={isSelected ? 8 : 6}
-              foundationDistanceScale={0.56}
-              foundationDirection="diagonal"
-              foundationColor={SelectorColors.ink}
+              selected={isSelected}
               containerStyle={styles.optionSurface}
               style={[
                 styles.optionButton,
@@ -123,7 +119,7 @@ export function ThemePreferenceSelector() {
                   },
                 ]}
               />
-            </FoundationSurface>
+            </GlideOptionSurface>
           );
         })}
       </View>
@@ -192,16 +188,7 @@ const styles = StyleSheet.create({
   },
   optionButton: {
     alignItems: 'center',
-    borderRadius: 18,
-    borderCurve: 'continuous',
-    borderWidth: 4,
-    borderColor: SelectorColors.ink,
-    flexDirection: 'row',
-    gap: Spacing.two,
     justifyContent: 'center',
-    minHeight: 64,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.three,
   },
   iconBadge: {
     width: 34,

@@ -1,7 +1,7 @@
-import { ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, View } from 'react-native';
 
+import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { ThemedText } from '@/components/themed-text';
-import { FoundationSurface } from '@/components/ui/foundation-surface';
 import { Spacing } from '@/constants/theme';
 import { type PracticeDraftCard, type TranslationCard } from '@/lib/backend/practice';
 
@@ -9,21 +9,13 @@ type PreviewPracticeCard = PracticeDraftCard | TranslationCard;
 
 type GeneratedPracticePreviewProps = {
   cards: PreviewPracticeCard[];
-  editable?: boolean;
-  onCardJapaneseChange?: (cardId: string, nextJapanese: string) => void;
 };
 
-const FoundationBorderColor = '#111111';
-const FoundationDistance = 0.56;
+const RailColors = ['#2FDD6C', '#65D7F2', '#FF9F45', '#9B7CFF'] as const;
 
-export function GeneratedPracticePreview({
-  cards,
-  editable = false,
-  onCardJapaneseChange,
-}: GeneratedPracticePreviewProps) {
-  const visibleCards = editable
-    ? cards
-    : cards.filter((card) => card.japanese.trim().length > 0);
+export function GeneratedPracticePreview({ cards }: GeneratedPracticePreviewProps) {
+  const palette = useDailyPalette();
+  const visibleCards = cards.filter((card) => card.japanese.trim().length > 0);
 
   return (
     <View style={styles.container}>
@@ -31,34 +23,33 @@ export function GeneratedPracticePreview({
         accessibilityLabel="作成された日本語カード"
         showsVerticalScrollIndicator={false}
         style={styles.scrollView}
-        contentContainerStyle={styles.cardStack}>
-        {visibleCards.map((card) => (
-          <FoundationSurface
-            key={card.id}
-            accessibilityRole="summary"
-            foundationDepth={7}
-            foundationDistanceScale={FoundationDistance}
-            foundationDirection="diagonal"
-            foundationColor={FoundationBorderColor}
-            style={styles.cardSlip}>
-            {editable ? (
-              <TextInput
-                value={card.japanese}
-                accessibilityLabel="日本語カード案を編集"
-                multiline
-                scrollEnabled={false}
-                textAlignVertical="top"
-                selectionColor="#276EF1"
-                onChangeText={(nextJapanese) => onCardJapaneseChange?.(card.id, nextJapanese)}
-                style={styles.japaneseInput}
+        contentContainerStyle={styles.railList}>
+        {visibleCards.length > 0 ? (
+          <View
+            accessible={false}
+            style={[styles.railLine, { backgroundColor: palette.border }]}
+          />
+        ) : null}
+        {visibleCards.map((card, index) => {
+          const japanese = card.japanese.trim();
+
+          return (
+            <View key={card.id} style={styles.railItem}>
+              <View
+                accessible={false}
+                style={[
+                  styles.railDot,
+                  {
+                    backgroundColor: RailColors[index % RailColors.length],
+                  },
+                ]}
               />
-            ) : (
-              <ThemedText style={styles.japaneseText} selectable>
-                {card.japanese}
+              <ThemedText style={styles.railText}>
+                {japanese}
               </ThemedText>
-            )}
-          </FoundationSurface>
-        ))}
+            </View>
+          );
+        })}
       </ScrollView>
     </View>
   );
@@ -66,38 +57,45 @@ export function GeneratedPracticePreview({
 
 const styles = StyleSheet.create({
   container: {
-    flex: 1,
     width: '100%',
-    minHeight: 220,
+    flexShrink: 1,
   },
   scrollView: {
-    flex: 1,
-    minHeight: 0,
+    flexShrink: 1,
   },
-  cardStack: {
+  railList: {
+    position: 'relative',
     gap: Spacing.three,
+    paddingLeft: 30,
     paddingBottom: Spacing.half,
   },
-  cardSlip: {
-    borderRadius: 18,
-    borderCurve: 'continuous',
+  railLine: {
+    position: 'absolute',
+    left: 8,
+    top: 8,
+    bottom: 8,
+    width: 3,
+    borderRadius: 999,
+  },
+  railItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.three,
+  },
+  railDot: {
+    width: 19,
+    height: 19,
+    borderRadius: 999,
     borderWidth: 3,
-    borderColor: FoundationBorderColor,
-    backgroundColor: '#FFF9EC',
-    padding: Spacing.three,
+    borderColor: '#111111',
+    marginLeft: -30,
+    marginTop: 5,
   },
-  japaneseText: {
-    color: '#111111',
-    fontSize: 22,
-    lineHeight: 32,
-    fontWeight: 900,
-  },
-  japaneseInput: {
-    minHeight: 44,
-    padding: 0,
-    color: '#111111',
-    fontSize: 22,
-    lineHeight: 32,
-    fontWeight: 900,
+  railText: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 19,
+    lineHeight: 29,
+    fontWeight: 700,
   },
 });

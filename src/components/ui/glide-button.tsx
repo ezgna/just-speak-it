@@ -33,11 +33,6 @@ const GlideSizeMetrics: Record<
     labelSize: number;
   }
 > = {
-  extraLarge: {
-    iconSize: 20,
-    labelLineHeight: 29,
-    labelSize: 18,
-  },
   large: {
     iconSize: 20,
     labelLineHeight: 26,
@@ -95,7 +90,6 @@ export function GlideButton({
   const toneStyle = GlideTones[tone];
   const sizeMetrics = GlideSizeMetrics[size];
   const compact = size === 'compact';
-  const extraLarge = size === 'extraLarge';
   const hasCaption = Boolean(caption);
   const sideAccessory = busy ? (
     <GlideButtonBusyIndicator color={toneStyle.textColor} size={size} />
@@ -126,7 +120,7 @@ export function GlideButton({
       <View
         style={{
           flexDirection: 'row',
-          alignItems: extraLarge ? 'flex-end' : 'center',
+          alignItems: 'center',
           justifyContent: compact ? 'center' : 'space-between',
           gap: 10,
         }}>
@@ -159,7 +153,7 @@ export function GlideButton({
               minWidth: 0,
             }}>
             <ThemedText
-              numberOfLines={extraLarge ? undefined : 1}
+              numberOfLines={1}
               style={{
                 flexShrink: 1,
                 color: toneStyle.textColor,

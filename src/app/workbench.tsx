@@ -1,7 +1,28 @@
 import { Host, FieldGroup, Picker, Row, Spacer, Text } from '@expo/ui';
-import { scrollIndicators } from '@expo/ui/swift-ui/modifiers';
+import {
+  Button as SwiftButton,
+  HStack as SwiftHStack,
+  Host as SwiftHost,
+  Image as SwiftImage,
+  Text as SwiftText,
+  ZStack as SwiftZStack,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityLabel,
+  animation,
+  Animation,
+  buttonStyle,
+  controlSize,
+  frame,
+  opacity,
+  padding,
+  scrollIndicators,
+  tint,
+} from '@expo/ui/swift-ui/modifiers';
+import * as Haptics from 'expo-haptics';
 import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useState } from 'react';
 
 import { useGenerationMode } from '@/hooks/use-generation-mode';
 import {
@@ -21,6 +42,9 @@ const GenerationModeOptions = [
   { caption: '自然な一文', label: '自然さ優先', value: 'natural' },
   { caption: '接続詞で分割', label: '短さ優先', value: 'compact' },
 ] satisfies readonly { caption: string; label: string; value: GenerationMode }[];
+
+const MemoStackerCopyAccent = '#276EF1';
+const fadeButtonStateAnimation = Animation.easeInOut({ duration: 0.16 });
 
 export default function WorkbenchScreen() {
   const {
@@ -127,6 +151,14 @@ export default function WorkbenchScreen() {
               onPress={() => router.push('/settings')}
               trailing="›"
             />
+          </FieldGroup.Section>
+
+          <FieldGroup.Section title="コピー状態">
+            <Row alignment="center" spacing={10}>
+              <Spacer flexible />
+              <MemoStackerCopyButton colorScheme={colorScheme} />
+              <Spacer flexible />
+            </Row>
           </FieldGroup.Section>
         </FieldGroup>
       </Host>
@@ -242,6 +274,41 @@ function ActionRow({
       <Spacer flexible />
       {trailing ? <Text textStyle={getChevronTextStyle(colors)}>{trailing}</Text> : null}
     </Row>
+  );
+}
+
+function MemoStackerCopyButton({ colorScheme }: { colorScheme: 'dark' | 'light' }) {
+  const [isCopied, setIsCopied] = useState(false);
+
+  function handleCopyPress() {
+    setIsCopied(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => undefined);
+  }
+
+  return (
+    <SwiftHost matchContents colorScheme={colorScheme}>
+      <SwiftButton
+        onPress={handleCopyPress}
+        modifiers={[
+          accessibilityLabel(isCopied ? '完了' : 'コピー'),
+          frame({ minWidth: 140, minHeight: 44 }),
+          padding({ top: 0, bottom: 0, leading: 18, trailing: 18 }),
+          controlSize('large'),
+          buttonStyle('glassProminent'),
+          tint(MemoStackerCopyAccent),
+        ]}>
+        <SwiftZStack modifiers={[animation(fadeButtonStateAnimation, isCopied)]}>
+          <SwiftHStack spacing={6} modifiers={[opacity(isCopied ? 0 : 1)]}>
+            <SwiftImage systemName="doc.on.doc" size={15} />
+            <SwiftText>コピー</SwiftText>
+          </SwiftHStack>
+          <SwiftHStack spacing={6} modifiers={[opacity(isCopied ? 1 : 0)]}>
+            <SwiftImage systemName="checkmark" size={15} />
+            <SwiftText>完了</SwiftText>
+          </SwiftHStack>
+        </SwiftZStack>
+      </SwiftButton>
+    </SwiftHost>
   );
 }
 
