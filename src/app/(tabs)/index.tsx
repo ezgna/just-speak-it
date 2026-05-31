@@ -1,4 +1,35 @@
 import {
+  FieldGroup,
+  Host,
+  Row,
+  Spacer,
+  Text,
+  TextInput,
+  type TextInputRef,
+  useNativeState,
+} from '@expo/ui';
+import {
+  Button as SwiftButton,
+  HStack as SwiftHStack,
+  Host as SwiftHost,
+  Image as SwiftImage,
+  type ImageProps as SwiftImageProps,
+  Text as SwiftText,
+} from '@expo/ui/swift-ui';
+import {
+  accessibilityLabel,
+  buttonStyle,
+  controlSize,
+  disabled as disabledModifier,
+  frame,
+  font,
+  lineLimit,
+  opacity,
+  padding,
+  scrollIndicators,
+  tint,
+} from '@expo/ui/swift-ui/modifiers';
+import {
   AudioModule,
   RecordingPresets,
   setAudioModeAsync,
@@ -7,16 +38,17 @@ import {
 } from 'expo-audio';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Keyboard, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
+import {
+  Alert,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { useDailyPalette } from '@/components/just-speak-it-ui';
-import { GeneratedPracticePreview } from '@/components/generated-practice-preview';
-import { ThemedText } from '@/components/themed-text';
-import { GlideButton } from '@/components/ui/glide-button';
-import { GlideTextInput } from '@/components/ui/glide-text-input';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
 import { useGenerationMode } from '@/hooks/use-generation-mode';
+import { useResolvedColorScheme } from '@/hooks/use-theme-preference';
 import {
   completePracticeDraft,
   discardPracticeDraft,
@@ -31,23 +63,58 @@ import { notifyPracticeChanged } from '@/lib/practice-refresh';
 import { transcribeRecording } from '@/lib/backend/transcription';
 
 type DiaryDraftSource = 'text' | 'voice';
+type NativeEditablePracticeCard = PracticeDraftCard;
+type NativeReadOnlyPracticeCard = PracticeDraftCard | TranslationCard;
+type NativeColorSet = {
+  errorText: string;
+  placeholderText: string;
+  primaryText: string;
+  screenBackground: string;
+  secondaryText: string;
+  selection: string;
+};
 
-const DraftInputMaxHeight = 264;
-const DraftInputFrameMaxHeight = 320;
+const NativeColors: Record<'dark' | 'light', NativeColorSet> = {
+  dark: {
+    errorText: '#FF453A',
+    placeholderText: '#8E8E93',
+    primaryText: '#FFFFFF',
+    screenBackground: '#000000',
+    secondaryText: '#A6A6AE',
+    selection: '#65D7F2',
+  },
+  light: {
+    errorText: '#D92D20',
+    placeholderText: '#8A8A8E',
+    primaryText: '#111111',
+    screenBackground: '#F2F2F7',
+    secondaryText: '#6E6E73',
+    selection: '#276EF1',
+  },
+};
+const MemoStackerCopyAccent = '#276EF1';
+const PrimaryActionButtonHeight = 82;
+const PrimaryActionButtonFontSize = 20;
+const PrimaryActionButtonHorizontalPadding = 26;
+const PrimaryActionButtonSideInset = Spacing.four;
+const PrimaryActionIconSize = 22;
 
 export default function HomeScreen() {
+  const { width } = useWindowDimensions();
   const safeAreaInsets = useSafeAreaInsets();
-  const palette = useDailyPalette();
+  const colorScheme = useResolvedColorScheme();
+  const nativeColors = NativeColors[colorScheme];
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const recorderState = useAudioRecorderState(audioRecorder);
   const { generationMode } = useGenerationMode();
   const [diaryDraftText, setDiaryDraftText] = useState('');
+  const { nativeText: diaryDraftNativeText, setNativeText: setDiaryDraftNativeText } =
+    useSyncedNativeText(diaryDraftText);
   const [diaryDraftSource, setDiaryDraftSource] = useState<DiaryDraftSource>('text');
   const [isRecordingBusy, setIsRecordingBusy] = useState(false);
   const [recordingIntentActive, setRecordingIntentActive] = useState(false);
   const [isStoppingRecording, setIsStoppingRecording] = useState(false);
   const [recordingStopDurationMillis, setRecordingStopDurationMillis] = useState(0);
-  const [writingPressHeld, setWritingPressHeld] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [isPreparingDraft, setIsPreparingDraft] = useState(false);
   const [isCompletingPractice, setIsCompletingPractice] = useState(false);
@@ -60,6 +127,7 @@ export default function HomeScreen() {
   const generationInFlightRef = useRef(false);
   const resetDraftOnBlurRef = useRef(false);
   const draftInteractionVersionRef = useRef(0);
+  const diaryDraftInputRef = useRef<TextInputRef>(null);
   const currentDraft = activeDraft?.generationMode === generationMode ? activeDraft : null;
 
   const isRecordingButtonActive = recorderState.isRecording || isStoppingRecording;
@@ -70,9 +138,6 @@ export default function HomeScreen() {
     : recordingStopDurationMillis;
   const recordingButtonDurationLabel = formatDuration(recordingButtonDurationMillis);
   const isWorking = isRecordingBusy || isTranscribing || isPreparingDraft || isCompletingPractice;
-  const isRecordingButtonPressed =
-    writingPressHeld || isTranscribing || isPreparingDraft || isCompletingPractice;
-  const isPrimaryButtonBusy = isWritingButtonActive;
   const isRecordingButtonDisabled =
     isWorking || (recordingIntentActive && !recorderState.isRecording);
   const isDraftInputEditable =
@@ -81,14 +146,46 @@ export default function HomeScreen() {
   const hasActiveDraft = Boolean(currentDraft && draftCards.length > 0);
   const hasCompletedPracticeCards = completedPracticeCards.length > 0;
   const shouldShowSplitAction =
-    hasDraftText && !hasActiveDraft && !hasCompletedPracticeCards && !isRecordingButtonActive && !isWritingButtonActive;
-  const shouldShowMakeCardsAction =
-    hasActiveDraft && !hasCompletedPracticeCards && !isRecordingButtonActive && !isWritingButtonActive;
-  const shouldShowReviewAction =
-    hasCompletedPracticeCards &&
+    hasDraftText &&
+    !hasActiveDraft &&
+    !hasCompletedPracticeCards &&
     !isRecordingButtonActive &&
     !isWritingButtonActive;
-
+  const shouldShowMakeCardsAction =
+    hasActiveDraft &&
+    !hasCompletedPracticeCards &&
+    !isRecordingButtonActive &&
+    !isWritingButtonActive;
+  const shouldShowReviewAction =
+    hasCompletedPracticeCards && !isRecordingButtonActive && !isWritingButtonActive;
+  const primaryActionLabel = getPrimaryActionLabel({
+    isCompletingPractice,
+    isPreparingDraft,
+    isRecordingButtonActive,
+    isTranscribing,
+    recordingButtonDurationLabel,
+    shouldShowMakeCardsAction,
+    shouldShowReviewAction,
+    shouldShowSplitAction,
+  });
+  const statusMessages = getStatusMessages({
+    isCompletingPractice,
+    isPreparingDraft,
+    isRecordingBusy,
+    isStoppingRecording,
+    isTranscribing,
+    recordingButtonDurationLabel,
+    recorderIsRecording: recorderState.isRecording,
+  });
+  const visibleCompletedPracticeCards = completedPracticeCards.filter(
+    (card) => card.japanese.trim().length > 0
+  );
+  const horizontalScreenPadding =
+    Math.max(safeAreaInsets.left, Spacing.three) + Math.max(safeAreaInsets.right, Spacing.three);
+  const primaryActionButtonWidth = Math.min(
+    Math.max(width - horizontalScreenPadding - PrimaryActionButtonSideInset * 2, 0),
+    MaxContentWidth
+  );
   const markDraftInteraction = useCallback(() => {
     draftInteractionVersionRef.current += 1;
   }, []);
@@ -234,8 +331,6 @@ export default function HomeScreen() {
     } finally {
       if (recordingUri) {
         setIsTranscribing(true);
-      } else {
-        setWritingPressHeld(false);
       }
       setIsStoppingRecording(false);
       setIsRecordingBusy(false);
@@ -273,7 +368,6 @@ export default function HomeScreen() {
       );
     } finally {
       setIsTranscribing(false);
-      setWritingPressHeld(false);
     }
   }
 
@@ -366,10 +460,9 @@ export default function HomeScreen() {
   }
 
   async function handlePrimaryActionPress() {
-    Keyboard.dismiss();
+    diaryDraftInputRef.current?.blur();
 
     if (recorderState.isRecording) {
-      setWritingPressHeld(true);
       await stopRecording();
       return;
     }
@@ -417,6 +510,7 @@ export default function HomeScreen() {
   }
 
   function handleDraftTextChange(nextText: string) {
+    setDiaryDraftNativeText(nextText);
     markDraftInteraction();
 
     if (!rawTranscriptText || !nextText.trim()) {
@@ -440,150 +534,405 @@ export default function HomeScreen() {
     );
   }
 
-  const contentArea = (
-    <View style={styles.contentArea}>
-      <View style={styles.draftStack}>
-        {transcriptionError && (
-          <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
-            {transcriptionError}
-          </ThemedText>
-        )}
-
-        {hasActiveDraft ? (
-          <GeneratedPracticePreview
-            cards={draftCards}
-            editable={!isCompletingPractice}
-            onCardJapaneseChange={handleDraftCardJapaneseChange}
-          />
-        ) : hasCompletedPracticeCards ? (
-          <GeneratedPracticePreview cards={completedPracticeCards} />
-        ) : (
-          <View style={styles.inputDismissArea}>
-            <GlideTextInput
-              value={diaryDraftText}
-              tone="cream"
-              accentTone="mint"
-              accessibilityLabel="今日の日本語を書く"
-              editable={isDraftInputEditable}
-              placeholder="今ふと考えていることをなんでも自由に日本語で話す・書く。"
-              frameStyle={styles.draftInputFrame}
-              inputStyle={[
-                styles.draftInput,
-                {
-                  opacity: isDraftInputEditable ? 1 : 0.78,
-                },
-              ]}
-              onChangeText={handleDraftTextChange}
-            />
-          </View>
-        )}
-
-        {generationError && (
-          <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
-            {generationError}
-          </ThemedText>
-        )}
-      </View>
-    </View>
-  );
-
   return (
     <View
       style={[
         styles.screen,
         {
-          backgroundColor: palette.background,
+          backgroundColor: nativeColors.screenBackground,
           paddingTop: safeAreaInsets.top,
-          paddingBottom: safeAreaInsets.bottom + Spacing.three,
+          paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
-      {hasActiveDraft || hasCompletedPracticeCards ? (
-        contentArea
-      ) : (
-        <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
-          {contentArea}
-        </TouchableWithoutFeedback>
-      )}
+      <Host colorScheme={colorScheme} style={styles.host}>
+        <FieldGroup
+          modifiers={[scrollIndicators('never', 'vertical')]}
+          style={{ backgroundColor: nativeColors.screenBackground }}>
+          {!hasActiveDraft && !hasCompletedPracticeCards ? (
+            <FieldGroup.Section title="入力">
+              <TextInput
+                ref={diaryDraftInputRef}
+                value={diaryDraftNativeText}
+                editable={isDraftInputEditable}
+                multiline
+                numberOfLines={6}
+                autoCapitalize="sentences"
+                autoCorrect
+                placeholder="今ふと考えていることをなんでも自由に日本語で話す・書く。"
+                placeholderTextColor={nativeColors.placeholderText}
+                returnKeyType="default"
+                selectionColor={nativeColors.selection}
+                style={getDiaryInputStyle(isDraftInputEditable)}
+                textStyle={getDiaryInputTextStyle(nativeColors)}
+                testID="today-diary-input"
+                onChangeText={handleDraftTextChange}
+              />
+            </FieldGroup.Section>
+          ) : null}
 
-      <View style={styles.buttonDock}>
-        <GlideButton
-          label={
-            isTranscribing
-              ? 'Transcribing'
-              : isPreparingDraft
-                ? 'Splitting'
-                : isCompletingPractice
-                  ? 'Making it'
-                  : isRecordingButtonActive
-                    ? recordingButtonDurationLabel
-                    : shouldShowReviewAction
-                      ? 'Review it'
-                      : shouldShowMakeCardsAction
-                        ? 'Make cards'
-                        : shouldShowSplitAction
-                          ? 'Split it'
-                          : 'Speak it'
-          }
-          accessibilityLabel={
-            isRecordingButtonActive
-              ? `録音を停止 ${recordingButtonDurationLabel}`
-              : shouldShowReviewAction
-                ? '作った英語カードを復習する'
-              : shouldShowMakeCardsAction
-                  ? '英語カードを作る'
-                  : shouldShowSplitAction
-                    ? '日本語を英語カード向けに分割する'
-                    : undefined
-          }
-          icon={
-            isRecordingButtonActive
-              ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
-              : shouldShowReviewAction
-                ? { ios: 'rectangle.stack.fill', android: 'layers', web: 'layers' }
-                : shouldShowMakeCardsAction
-                  ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
-                  : shouldShowSplitAction || isPreparingDraft
-                    ? { ios: 'rectangle.split.2x1.fill', android: 'splitscreen', web: 'splitscreen' }
-                    : { ios: 'mic.fill', android: 'mic', web: 'mic' }
-          }
-          busy={isPrimaryButtonBusy}
-          tone={
-            isPreparingDraft || isTranscribing
-              ? 'aqua'
-              : isCompletingPractice
-                ? 'blue'
-              : isRecordingButtonActive
-                ? 'orange'
-                : shouldShowReviewAction
-                  ? 'grape'
-                  : shouldShowMakeCardsAction
-                    ? 'blue'
-                    : shouldShowSplitAction
-                      ? 'orange'
-                    : 'mint'
-          }
-          size="large"
-          disabled={isRecordingButtonDisabled}
-          pressed={isRecordingButtonPressed}
-          holdPressOut={recorderState.isRecording}
-          containerStyle={styles.recordButtonContainer}
-          onPress={handlePrimaryActionPress}
-        />
+          {hasActiveDraft ? (
+            <FieldGroup.Section title="カード下書き">
+              {draftCards.map((card, index) => (
+                <EditablePracticeCardRow
+                  key={card.id}
+                  card={card}
+                  colors={nativeColors}
+                  disabled={isCompletingPractice}
+                  index={index}
+                  onCardJapaneseChange={handleDraftCardJapaneseChange}
+                />
+              ))}
+            </FieldGroup.Section>
+          ) : null}
 
+          {hasCompletedPracticeCards ? (
+            <FieldGroup.Section title="作成済みカード">
+              {visibleCompletedPracticeCards.map((card, index) => (
+                <ReadOnlyPracticeCardRow
+                  key={card.id}
+                  card={card}
+                  colors={nativeColors}
+                  index={index}
+                />
+              ))}
+            </FieldGroup.Section>
+          ) : null}
+
+          {statusMessages.length > 0 ? (
+            <FieldGroup.Section title="状態">
+              {statusMessages.map((message) => (
+                <Text key={message} textStyle={getStatusTextStyle(nativeColors)}>
+                  {message}
+                </Text>
+              ))}
+            </FieldGroup.Section>
+          ) : null}
+
+          {transcriptionError || generationError ? (
+            <FieldGroup.Section title="エラー">
+              {transcriptionError ? (
+                <Text textStyle={getErrorTextStyle(nativeColors)}>{transcriptionError}</Text>
+              ) : null}
+              {generationError ? (
+                <Text textStyle={getErrorTextStyle(nativeColors)}>{generationError}</Text>
+              ) : null}
+            </FieldGroup.Section>
+          ) : null}
+        </FieldGroup>
+      </Host>
+      <View style={styles.buttonStack}>
         {hasActiveDraft && !isCompletingPractice ? (
-          <GlideButton
-            label="Start over"
-            icon={{ ios: 'arrow.counterclockwise', android: 'refresh', web: 'refresh' }}
-            tone="coral"
-            size="medium"
-            onPress={handleDiscardDraft}
-          />
-        ) : null}
+          <View style={styles.draftActionStack}>
+            <View style={styles.primaryButtonDock}>
+              <MemoStackerPrimaryActionButton
+                colorScheme={colorScheme}
+                disabled={isRecordingButtonDisabled}
+                iconName={getPrimaryActionIconName(primaryActionLabel)}
+                label={primaryActionLabel}
+                width={primaryActionButtonWidth}
+                onPress={handlePrimaryActionPress}
+              />
+            </View>
+            <StartOverTextAction colorScheme={colorScheme} onPress={handleDiscardDraft} />
+          </View>
+        ) : (
+          <View style={styles.primaryButtonDock}>
+            <MemoStackerPrimaryActionButton
+              colorScheme={colorScheme}
+              disabled={isRecordingButtonDisabled}
+              iconName={getPrimaryActionIconName(primaryActionLabel)}
+              label={primaryActionLabel}
+              width={primaryActionButtonWidth}
+              onPress={handlePrimaryActionPress}
+            />
+          </View>
+        )}
+
       </View>
     </View>
   );
+}
+
+function MemoStackerPrimaryActionButton({
+  colorScheme,
+  disabled,
+  iconName,
+  label,
+  onPress,
+  width,
+}: {
+  colorScheme: 'dark' | 'light';
+  disabled: boolean;
+  iconName: NonNullable<SwiftImageProps['systemName']>;
+  label: string;
+  onPress: () => void;
+  width: number;
+}) {
+  const contentWidth = Math.max(width - PrimaryActionButtonHorizontalPadding * 2, 0);
+
+  return (
+    <SwiftHost colorScheme={colorScheme} style={{ height: PrimaryActionButtonHeight, width }}>
+      <SwiftButton
+        onPress={onPress}
+        modifiers={[
+          accessibilityLabel(label),
+          frame({ width, minHeight: PrimaryActionButtonHeight }),
+          padding({
+            top: 0,
+            bottom: 0,
+            leading: PrimaryActionButtonHorizontalPadding,
+            trailing: PrimaryActionButtonHorizontalPadding,
+          }),
+          controlSize('large'),
+          buttonStyle('glassProminent'),
+          tint(MemoStackerCopyAccent),
+          disabledModifier(disabled),
+          opacity(disabled ? 0.82 : 1),
+        ]}>
+        <SwiftHStack
+          spacing={9}
+          modifiers={[frame({ width: contentWidth, minHeight: PrimaryActionButtonHeight })]}>
+          <SwiftImage
+            systemName={iconName}
+            size={PrimaryActionIconSize}
+          />
+          <SwiftText
+            modifiers={[
+              font({ size: PrimaryActionButtonFontSize, weight: 'semibold' }),
+              lineLimit(1),
+            ]}>
+            {label}
+          </SwiftText>
+        </SwiftHStack>
+      </SwiftButton>
+    </SwiftHost>
+  );
+}
+
+function StartOverTextAction({
+  colorScheme,
+  onPress,
+}: {
+  colorScheme: 'dark' | 'light';
+  onPress: () => void;
+}) {
+  return (
+    <SwiftHost matchContents colorScheme={colorScheme}>
+      <SwiftButton
+        onPress={onPress}
+        modifiers={[
+          accessibilityLabel('Start over'),
+          buttonStyle('plain'),
+          tint(MemoStackerCopyAccent),
+          padding({ top: 4, bottom: 4, leading: 18, trailing: 18 }),
+        ]}>
+        <SwiftText
+          modifiers={[font({ size: 16, weight: 'medium' }), lineLimit(1), opacity(0.84)]}>
+          Start over
+        </SwiftText>
+      </SwiftButton>
+    </SwiftHost>
+  );
+}
+
+function EditablePracticeCardRow({
+  card,
+  colors,
+  disabled,
+  index,
+  onCardJapaneseChange,
+}: {
+  card: NativeEditablePracticeCard;
+  colors: NativeColorSet;
+  disabled: boolean;
+  index: number;
+  onCardJapaneseChange: (cardId: string, nextJapanese: string) => void;
+}) {
+  const { nativeText: cardNativeText, setNativeText: setCardNativeText } =
+    useSyncedNativeText(card.japanese);
+
+  const handleCardTextChange = useCallback(
+    (nextJapanese: string) => {
+      setCardNativeText(nextJapanese);
+      onCardJapaneseChange(card.id, nextJapanese);
+    },
+    [card.id, onCardJapaneseChange, setCardNativeText]
+  );
+
+  return (
+    <Row alignment="start" spacing={10}>
+      <Text textStyle={getCardIndexTextStyle(colors)}>{String(index + 1)}</Text>
+      <TextInput
+        value={cardNativeText}
+        editable={!disabled}
+        multiline
+        numberOfLines={3}
+        selectionColor={colors.selection}
+        style={getCardInputStyle(disabled)}
+        textStyle={getCardInputTextStyle(colors)}
+        testID={`today-draft-card-${card.id}`}
+        onChangeText={handleCardTextChange}
+      />
+    </Row>
+  );
+}
+
+/* eslint-disable react-hooks/immutability -- @expo/ui の ObservableState は value 更新が公式API。 */
+function useSyncedNativeText(sourceText: string) {
+  const nativeText = useNativeState(sourceText);
+  const nativeSyncRef = useRef(sourceText);
+
+  const setNativeText = useCallback(
+    (nextText: string) => {
+      nativeText.value = nextText;
+      nativeSyncRef.current = nextText;
+    },
+    [nativeText]
+  );
+
+  useEffect(() => {
+    if (nativeSyncRef.current === sourceText) {
+      return;
+    }
+
+    setNativeText(sourceText);
+  }, [setNativeText, sourceText]);
+
+  return { nativeText, setNativeText };
+}
+/* eslint-enable react-hooks/immutability */
+
+function ReadOnlyPracticeCardRow({
+  card,
+  colors,
+  index,
+}: {
+  card: NativeReadOnlyPracticeCard;
+  colors: NativeColorSet;
+  index: number;
+}) {
+  return (
+    <Row alignment="start" spacing={10}>
+      <Text textStyle={getCardIndexTextStyle(colors)}>{String(index + 1)}</Text>
+      <Text textStyle={getCardTextStyle(colors)}>{card.japanese}</Text>
+      <Spacer flexible />
+    </Row>
+  );
+}
+
+function getPrimaryActionLabel({
+  isCompletingPractice,
+  isPreparingDraft,
+  isRecordingButtonActive,
+  isTranscribing,
+  recordingButtonDurationLabel,
+  shouldShowMakeCardsAction,
+  shouldShowReviewAction,
+  shouldShowSplitAction,
+}: {
+  isCompletingPractice: boolean;
+  isPreparingDraft: boolean;
+  isRecordingButtonActive: boolean;
+  isTranscribing: boolean;
+  recordingButtonDurationLabel: string;
+  shouldShowMakeCardsAction: boolean;
+  shouldShowReviewAction: boolean;
+  shouldShowSplitAction: boolean;
+}) {
+  if (isTranscribing) {
+    return 'Transcribing';
+  }
+
+  if (isPreparingDraft) {
+    return 'Splitting';
+  }
+
+  if (isCompletingPractice) {
+    return 'Making it';
+  }
+
+  if (isRecordingButtonActive) {
+    return recordingButtonDurationLabel;
+  }
+
+  if (shouldShowReviewAction) {
+    return 'Review it';
+  }
+
+  if (shouldShowMakeCardsAction) {
+    return 'Make cards';
+  }
+
+  if (shouldShowSplitAction) {
+    return 'Split it';
+  }
+
+  return 'Speak it';
+}
+
+function getPrimaryActionIconName(label: string): NonNullable<SwiftImageProps['systemName']> {
+  if (/^\d+:\d{2}$/.test(label)) {
+    return 'stop.circle.fill';
+  }
+
+  switch (label) {
+    case 'Transcribing':
+      return 'waveform';
+    case 'Splitting':
+    case 'Split it':
+      return 'rectangle.split.2x1.fill';
+    case 'Making it':
+    case 'Make cards':
+      return 'sparkles';
+    case 'Review it':
+      return 'rectangle.stack.fill';
+    default:
+      return 'mic.fill';
+  }
+}
+
+function getStatusMessages({
+  isCompletingPractice,
+  isPreparingDraft,
+  isRecordingBusy,
+  isStoppingRecording,
+  isTranscribing,
+  recordingButtonDurationLabel,
+  recorderIsRecording,
+}: {
+  isCompletingPractice: boolean;
+  isPreparingDraft: boolean;
+  isRecordingBusy: boolean;
+  isStoppingRecording: boolean;
+  isTranscribing: boolean;
+  recordingButtonDurationLabel: string;
+  recorderIsRecording: boolean;
+}) {
+  const messages: string[] = [];
+
+  if (isRecordingBusy && !recorderIsRecording && !isStoppingRecording) {
+    messages.push('録音を準備しています。');
+  }
+
+  if (recorderIsRecording || isStoppingRecording) {
+    messages.push(`録音中 ${recordingButtonDurationLabel}`);
+  }
+
+  if (isTranscribing) {
+    messages.push('文字起こし中です。');
+  }
+
+  if (isPreparingDraft) {
+    messages.push('日本語をカード向けに分割しています。');
+  }
+
+  if (isCompletingPractice) {
+    messages.push('英語カードを作成しています。');
+  }
+
+  return messages;
 }
 
 function formatDuration(durationMillis: number) {
@@ -597,51 +946,102 @@ async function setRecordingHapticsAllowed(allowed: boolean) {
   await setHapticsAllowedDuringRecording(allowed).catch(() => undefined);
 }
 
+function getDiaryInputStyle(isEditable: boolean) {
+  return {
+    backgroundColor: 'transparent',
+    height: 220,
+    opacity: isEditable ? 1 : 0.72,
+    padding: 0,
+    width: '100%',
+  } as const;
+}
+
+function getCardInputStyle(isDisabled: boolean) {
+  return {
+    backgroundColor: 'transparent',
+    height: 88,
+    opacity: isDisabled ? 0.72 : 1,
+    padding: 0,
+    width: '100%',
+  } as const;
+}
+
+function getDiaryInputTextStyle(colors: NativeColorSet) {
+  return {
+    color: colors.primaryText,
+    fontSize: 20,
+    fontWeight: '600',
+    lineHeight: 30,
+  } as const;
+}
+
+function getCardInputTextStyle(colors: NativeColorSet) {
+  return {
+    color: colors.primaryText,
+    fontSize: 19,
+    fontWeight: '600',
+    lineHeight: 28,
+  } as const;
+}
+
+function getCardTextStyle(colors: NativeColorSet) {
+  return {
+    color: colors.primaryText,
+    fontSize: 19,
+    fontWeight: '600',
+    lineHeight: 28,
+  } as const;
+}
+
+function getCardIndexTextStyle(colors: NativeColorSet) {
+  return {
+    color: colors.secondaryText,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  } as const;
+}
+
+function getStatusTextStyle(colors: NativeColorSet) {
+  return {
+    color: colors.secondaryText,
+    fontSize: 15,
+    fontWeight: '500',
+    lineHeight: 22,
+  } as const;
+}
+
+function getErrorTextStyle(colors: NativeColorSet) {
+  return {
+    color: colors.errorText,
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 22,
+  } as const;
+}
+
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     alignItems: 'center',
-    gap: Spacing.three,
+    width: '100%',
   },
-  contentArea: {
+  host: {
     flex: 1,
-    width: '100%',
     maxWidth: MaxContentWidth,
-    justifyContent: 'center',
-    gap: Spacing.three,
-    paddingVertical: Spacing.one,
-  },
-  draftStack: {
-    flex: 1,
-    width: '100%',
-    gap: Spacing.three,
-  },
-  inputDismissArea: {
     width: '100%',
   },
-  draftInputFrame: {
-    minHeight: 220,
-    maxHeight: DraftInputFrameMaxHeight,
-  },
-  draftInput: {
-    minHeight: 160,
-    maxHeight: DraftInputMaxHeight,
-    padding: 0,
-    fontSize: 20,
-    lineHeight: 31,
-    fontWeight: 900,
-  },
-  errorText: {
-    fontSize: 16,
-    lineHeight: 24,
-    fontWeight: 600,
-  },
-  buttonDock: {
-    width: '100%',
-    maxWidth: MaxContentWidth,
+  buttonStack: {
     gap: Spacing.two,
+    maxWidth: MaxContentWidth,
+    width: '100%',
   },
-  recordButtonContainer: {
-    opacity: 1,
+  primaryButtonDock: {
+    alignItems: 'center',
+  },
+  draftActionStack: {
+    alignItems: 'center',
+    gap: Spacing.one,
+    width: '100%',
   },
 });
