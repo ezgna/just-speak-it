@@ -27,14 +27,24 @@ export default function SettingsScreen() {
       ]}>
       <View style={styles.container}>
         {__DEV__ ? (
-          <GlideButton
-            label="実験室"
-            caption="design lab"
-            icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
-            tone="mint"
-            size="medium"
-            onPress={() => router.push('/design-lab')}
-          />
+          <View style={styles.labButtons}>
+            <GlideButton
+              label="実験室"
+              caption="design lab"
+              icon={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }}
+              tone="mint"
+              size="medium"
+              onPress={() => router.push('/design-lab')}
+            />
+            <GlideButton
+              label="ワークベンチ"
+              caption="workbench"
+              icon={{ ios: 'square.grid.2x2.fill', android: 'dashboard_customize', web: 'dashboard_customize' }}
+              tone="sky"
+              size="medium"
+              onPress={() => router.push('/workbench')}
+            />
+          </View>
         ) : null}
 
         <ThemePreferenceSelector />
@@ -56,5 +66,8 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: MaxContentWidth,
     gap: Spacing.four,
+  },
+  labButtons: {
+    gap: Spacing.two,
   },
 });
