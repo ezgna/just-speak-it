@@ -1,21 +1,34 @@
-import { Host, FieldGroup, Row, Spacer, Text } from '@expo/ui';
+import { Host, FieldGroup, Picker, Row, Spacer, Text } from '@expo/ui';
 import { scrollIndicators } from '@expo/ui/swift-ui/modifiers';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
-import { useResolvedColorScheme } from '@/hooks/use-theme-preference';
+import { useGenerationMode } from '@/hooks/use-generation-mode';
+import {
+  type ThemePreference,
+  useThemePreference,
+} from '@/hooks/use-theme-preference';
+import { type GenerationMode } from '@/lib/generation-mode';
+import { isSupabaseConfigured, supabaseUrl } from '@/lib/supabase/client';
 
-const AccountRows = [
-  { label: '名前', value: 'Workbench' },
-  { label: 'モデル', value: 'Just Speak It' },
-  { label: '開始', value: '2026年 5月' },
-] as const;
+const ThemePreferenceOptions = [
+  { label: '自動', value: 'system' },
+  { label: 'ライト', value: 'light' },
+  { label: 'ダーク', value: 'dark' },
+] satisfies readonly { label: string; value: ThemePreference }[];
 
-const SupportRows = ['画面案を評価', '共有する', 'メモを送る'] as const;
-const FollowRows = ['just-speak-it.app', 'Instagram', 'TikTok', 'X'] as const;
+const GenerationModeOptions = [
+  { caption: '自然な一文', label: '自然さ優先', value: 'natural' },
+  { caption: '接続詞で分割', label: '短さ優先', value: 'compact' },
+] satisfies readonly { caption: string; label: string; value: GenerationMode }[];
 
 export default function WorkbenchScreen() {
-  const colorScheme = useResolvedColorScheme();
+  const {
+    resolvedColorScheme: colorScheme,
+    setThemePreference,
+    themePreference,
+  } = useThemePreference();
+  const { generationMode, setGenerationMode } = useGenerationMode();
   const colors = WorkbenchColors[colorScheme];
 
   return (
@@ -53,54 +66,127 @@ export default function WorkbenchScreen() {
         <FieldGroup
           modifiers={[scrollIndicators('never', 'vertical')]}
           style={{ backgroundColor: colors.background }}>
-          <FieldGroup.Section title="Account">
-            {AccountRows.map((row) => (
-              <InfoRow key={row.label} colors={colors} label={row.label} value={row.value} />
-            ))}
-            <FieldGroup.SectionFooter>
-              <Text textStyle={getFooterTextStyle(colors)}>User ID: workbench-preview</Text>
-            </FieldGroup.SectionFooter>
+          <FieldGroup.Section title="表示">
+            <ThemePreferenceRow
+              colors={colors}
+              onValueChange={setThemePreference}
+              selectedValue={themePreference}
+            />
+            <PaletteRow colors={colors} />
           </FieldGroup.Section>
 
-          <FieldGroup.Section title="Credits">
-            <InfoRow colors={colors} label="残り" value="1 credit" valueTone="accent" />
-            <ActionRow colors={colors} icon="⚡" label="クレジットを追加" accent />
+          <FieldGroup.Section title="生成">
+            <GenerationModeRow
+              colors={colors}
+              onValueChange={setGenerationMode}
+              selectedValue={generationMode}
+            />
             <FieldGroup.SectionFooter>
               <Text textStyle={getFooterTextStyle(colors)}>
-                1 credit unlocks one practice generation. Credits never expire.
+                練習カード生成で使う文のまとめ方を切り替えます。
               </Text>
             </FieldGroup.SectionFooter>
           </FieldGroup.Section>
 
-          <FieldGroup.Section>
-            <ActionRow colors={colors} icon="🎁" label="Enjoying the app?" trailing="›" />
-            <ActionRow colors={colors} icon="🎨" label="Are you an artist?" trailing="›" />
+          <FieldGroup.Section title="データ">
+            <InfoRow colors={colors} label="ローカル保存" value="MMKV" valueTone="accent" />
+            <InfoRow
+              colors={colors}
+              label="Supabase"
+              value={isSupabaseConfigured ? '設定済み' : '未設定'}
+              valueTone={isSupabaseConfigured ? 'accent' : 'secondary'}
+            />
+            <InfoRow colors={colors} label="プロジェクト" value={getSupabaseProjectLabel()} />
+            <InfoRow colors={colors} label="セッション" value="必要時に匿名作成" />
+            <FieldGroup.SectionFooter>
+              <Text textStyle={getFooterTextStyle(colors)}>
+                破壊的なリセット操作はまだ置かず、まず状態確認だけにしています。
+              </Text>
+            </FieldGroup.SectionFooter>
           </FieldGroup.Section>
 
-          <FieldGroup.Section title="Support & Feedback">
-            {SupportRows.map((label, index) => (
-              <ActionRow
-                key={label}
-                colors={colors}
-                icon={['★', '⇧', '✉'][index] ?? '•'}
-                label={label}
-              />
-            ))}
-          </FieldGroup.Section>
-
-          <FieldGroup.Section title="Follow Us">
-            {FollowRows.map((label, index) => (
-              <ActionRow
-                key={label}
-                colors={colors}
-                icon={['◎', '📷', '♪', '𝕏'][index] ?? '•'}
-                label={label}
-              />
-            ))}
+          <FieldGroup.Section title="画面ラボ">
+            <ActionRow
+              colors={colors}
+              icon="◆"
+              label="実験室を開く"
+              onPress={() => router.push('/design-lab')}
+              trailing="›"
+            />
+            <ActionRow
+              colors={colors}
+              icon="⌂"
+              label="ホームを確認"
+              onPress={() => router.push('/')}
+              trailing="›"
+            />
+            <ActionRow
+              colors={colors}
+              icon="⚙"
+              label="通常設定に戻る"
+              onPress={() => router.push('/settings')}
+              trailing="›"
+            />
           </FieldGroup.Section>
         </FieldGroup>
       </Host>
     </>
+  );
+}
+
+function GenerationModeRow({
+  colors,
+  onValueChange,
+  selectedValue,
+}: {
+  colors: WorkbenchColorSet;
+  onValueChange: (nextMode: GenerationMode) => void;
+  selectedValue: GenerationMode;
+}) {
+  return (
+    <Row alignment="center" spacing={10}>
+      <Text textStyle={getPrimaryTextStyle(colors)}>カード生成</Text>
+      <Spacer flexible />
+      <Picker<GenerationMode> selectedValue={selectedValue} onValueChange={onValueChange}>
+        {GenerationModeOptions.map((option) => (
+          <Picker.Item key={option.value} label={option.label} value={option.value} />
+        ))}
+      </Picker>
+    </Row>
+  );
+}
+
+function ThemePreferenceRow({
+  colors,
+  onValueChange,
+  selectedValue,
+}: {
+  colors: WorkbenchColorSet;
+  onValueChange: (nextPreference: ThemePreference) => void;
+  selectedValue: ThemePreference;
+}) {
+  return (
+    <Row alignment="center" spacing={10}>
+      <Text textStyle={getPrimaryTextStyle(colors)}>テーマ</Text>
+      <Spacer flexible />
+      <Picker<ThemePreference> selectedValue={selectedValue} onValueChange={onValueChange}>
+        {ThemePreferenceOptions.map((option) => (
+          <Picker.Item key={option.value} label={option.label} value={option.value} />
+        ))}
+      </Picker>
+    </Row>
+  );
+}
+
+function PaletteRow({ colors }: { colors: WorkbenchColorSet }) {
+  return (
+    <Row alignment="center" spacing={10}>
+      <Text textStyle={getPrimaryTextStyle(colors)}>パレット</Text>
+      <Spacer flexible />
+      <Text numberOfLines={1} textStyle={getCompactTextStyle(colors)}>
+        {`背景 ${colors.background} / 文字 ${colors.text} / 強調 ${colors.accent}`}
+      </Text>
+    </Row>
   );
 }
 
@@ -135,16 +221,18 @@ function ActionRow({
   colors,
   icon,
   label,
+  onPress,
   trailing,
 }: {
   accent?: boolean;
   colors: WorkbenchColorSet;
   icon: string;
   label: string;
+  onPress?: () => void;
   trailing?: string;
 }) {
   return (
-    <Row alignment="center" spacing={10}>
+    <Row alignment="center" onPress={onPress} spacing={10}>
       <Text textStyle={accent ? getAccentIconTextStyle(colors) : getIconTextStyle(colors)}>
         {icon}
       </Text>
@@ -155,6 +243,18 @@ function ActionRow({
       {trailing ? <Text textStyle={getChevronTextStyle(colors)}>{trailing}</Text> : null}
     </Row>
   );
+}
+
+function getSupabaseProjectLabel() {
+  if (!supabaseUrl) {
+    return 'なし';
+  }
+
+  try {
+    return new URL(supabaseUrl).host;
+  } catch {
+    return '設定済み';
+  }
 }
 
 type WorkbenchColorSet = {
@@ -193,6 +293,15 @@ const getSecondaryTextStyle = (colors: WorkbenchColorSet) =>
     fontSize: 16,
     fontWeight: '400',
     lineHeight: 22,
+    textAlign: 'right',
+  }) as const;
+
+const getCompactTextStyle = (colors: WorkbenchColorSet) =>
+  ({
+    color: colors.secondaryText,
+    fontSize: 12,
+    fontWeight: '500',
+    lineHeight: 16,
     textAlign: 'right',
   }) as const;
 
