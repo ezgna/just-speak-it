@@ -5,6 +5,13 @@ type CleanTranscriptOutput = {
   cleaned_text: string;
 };
 
+type TranscriptWord = {
+  index: number;
+  word: string;
+  start: number;
+  end: number;
+};
+
 const cleanTranscriptSchema = {
   type: 'object',
   additionalProperties: false,
@@ -45,8 +52,10 @@ export default {
 
     const transcriptionForm = new FormData();
     transcriptionForm.append('file', audio, audio.name || 'daily-recording.m4a');
-    transcriptionForm.append('model', Deno.env.get('OPENAI_TRANSCRIBE_MODEL') ?? 'gpt-4o-transcribe');
+    transcriptionForm.append('model', 'whisper-1');
     transcriptionForm.append('language', 'ja');
+    transcriptionForm.append('response_format', 'verbose_json');
+    transcriptionForm.append('timestamp_granularities[]', 'word');
 
     const transcriptionResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
       method: 'POST',
@@ -68,6 +77,7 @@ export default {
     }
 
     const rawText = result.text.trim();
+    const words = readTranscriptWords(result);
     const cleaned = await createOpenAIJsonResponse<CleanTranscriptOutput>({
       schemaName: 'daily_to_english_clean_transcript',
       schema: cleanTranscriptSchema,
@@ -94,6 +104,44 @@ export default {
       return errorResponse('整形後の文字起こし結果が空でした。', 502);
     }
 
-    return jsonResponse({ rawText, cleanedText });
+    return jsonResponse({ rawText, cleanedText, words });
   },
 };
+
+function readTranscriptWords(payload: unknown): TranscriptWord[] {
+  if (!isRecord(payload) || !Array.isArray(payload.words)) {
+    return [];
+  }
+
+  return payload.words.flatMap((word, index) => {
+    if (!isRecord(word)) {
+      return [];
+    }
+
+    const text =
+      typeof word.word === 'string'
+        ? word.word
+        : typeof word.text === 'string'
+          ? word.text
+          : null;
+
+    if (
+      !text?.trim() ||
+      typeof word.start !== 'number' ||
+      typeof word.end !== 'number'
+    ) {
+      return [];
+    }
+
+    return {
+      index,
+      word: text.trim(),
+      start: word.start,
+      end: word.end,
+    };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}

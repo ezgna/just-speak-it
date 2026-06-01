@@ -1186,7 +1186,6 @@ export default function DesignLabScreen() {
   return (
     <FoundationSurfacePressDelayProvider pressDelay={FOUNDATION_SCROLL_PRESS_DELAY_MS}>
       <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
         style={[styles.screen, { backgroundColor: palette.background }]}
         contentContainerStyle={[
           styles.content,

@@ -14,13 +14,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { ThemedText } from '@/components/themed-text';
 import { FoundationSurface } from '@/components/ui/foundation-surface';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { listDiaryEntries, type DiaryEntry } from '@/lib/backend/practice';
 import { subscribeToPracticeRefresh } from '@/lib/practice-refresh';
 
 type LoadMode = 'initial' | 'refresh' | 'sync';
 type DiaryDisplayMode = 'original' | 'plain' | 'polished' | 'bullets';
-const WebTopTabInset = process.env.EXPO_OS === 'web' ? 76 : 0;
 
 const DiaryDisplayModeOptions: { label: string; value: DiaryDisplayMode }[] = [
   { label: '原文', value: 'original' },
@@ -153,12 +152,11 @@ export default function DiaryScreen() {
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
       style={[styles.scrollView, { backgroundColor: palette.background }]}
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: safeAreaInsets.top + WebTopTabInset + Spacing.two,
+          paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
           paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),

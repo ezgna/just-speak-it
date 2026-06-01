@@ -11,6 +11,7 @@ Read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before 
 ## DB開発運用
 
 - このアプリは開発中のため、Supabaseの既存データ保持は優先しない。
+- このrepoでは、ユーザーから明示的に依頼されない限り、`supabase start` やDocker起動は行わない。
 - スキーマを変えるときは、古いテーブルや匿名ユーザー、テスト用の日記・カードをリフレッシュしてよい。
 - 現時点では、過去データを残すための安全な差分マイグレーションよりも、必要なテーブルだけを作り直す破壊的マイグレーションを優先する。
 - リモートSupabaseへ反映するときは、DBパスワードを `/Users/sury/.keys/supabase/just-speak-it/.env` から読み込んで実行する。

@@ -5,12 +5,21 @@ type GenerationMode = 'natural' | 'compact';
 
 type DraftCard = {
   japanese: string;
+  sourceWordStartIndex: number | null;
+  sourceWordEndIndex: number | null;
 };
 
 type PreparePracticeDraftOutput = {
   polishedText: string;
   bulletPoints: string[];
   cards: DraftCard[];
+};
+
+type TranscriptWord = {
+  index: number;
+  word: string;
+  start: number;
+  end: number;
 };
 
 type DiaryEntryRow = {
@@ -21,6 +30,7 @@ type DiaryEntryRow = {
   plain_text: string;
   polished_text: string;
   bullet_points: unknown;
+  transcript_words: unknown;
   content_hash: string;
   created_at: string;
   updated_at: string;
@@ -54,9 +64,11 @@ const draftSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['japanese'],
+        required: ['japanese', 'sourceWordStartIndex', 'sourceWordEndIndex'],
         properties: {
           japanese: { type: 'string' },
+          sourceWordStartIndex: { type: ['integer', 'null'] },
+          sourceWordEndIndex: { type: ['integer', 'null'] },
         },
       },
     },
@@ -64,10 +76,11 @@ const draftSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
-const translationCardSelect = 'id, practice_generation_id, sort_order, japanese, english, created_at';
+const translationCardSelect =
+  'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
 
 export default {
   async fetch(req: Request) {
@@ -105,6 +118,7 @@ export default {
 
     const source = body?.source === 'text' ? 'text' : 'voice';
     const generationMode = parseGenerationMode(body?.generationMode);
+    const transcriptWords = source === 'voice' ? normalizeTranscriptWords(body?.transcriptWords) : [];
 
     let output: PreparePracticeDraftOutput;
 
@@ -112,8 +126,8 @@ export default {
       output = await createOpenAIJsonResponse<PreparePracticeDraftOutput>({
         schemaName: 'daily_to_english_practice_draft',
         schema: draftSchema,
-        instructions: createDraftInstructions(generationMode),
-        input: plainText,
+        instructions: createDraftInstructions(generationMode, transcriptWords.length > 0),
+        input: createDraftInput(plainText, transcriptWords),
         maxOutputTokens: 4200,
       });
     } catch (error) {
@@ -129,6 +143,7 @@ export default {
       .map((card, index) => ({
         sort_order: index + 1,
         japanese: card.japanese.trim(),
+        ...createCardTimestampFields(card, transcriptWords),
       }))
       .filter((card) => card.japanese);
 
@@ -153,6 +168,7 @@ export default {
         plain_text: plainText,
         polished_text: polishedText,
         bullet_points: bulletPoints,
+        transcript_words: transcriptWords,
         content_hash: contentHash,
       })
       .select(diaryEntrySelect)
@@ -185,6 +201,10 @@ export default {
       sort_order: card.sort_order,
       japanese: card.japanese,
       english: null,
+      source_word_start_index: card.source_word_start_index,
+      source_word_end_index: card.source_word_end_index,
+      audio_start_sec: card.audio_start_sec,
+      audio_end_sec: card.audio_end_sec,
     }));
     const { data: cards, error: cardsError } = await supabase
       .from('translation_cards')
@@ -260,27 +280,120 @@ function parseGenerationMode(value: unknown): GenerationMode {
   return value === 'natural' ? 'natural' : 'compact';
 }
 
-function createDraftInstructions(generationMode: GenerationMode) {
+function createDraftInput(plainText: string, transcriptWords: TranscriptWord[]) {
+  if (transcriptWords.length === 0) {
+    return JSON.stringify({
+      plainText,
+      transcriptWords: [],
+    });
+  }
+
+  return JSON.stringify({
+    plainText,
+    transcriptWords: transcriptWords.map((word) => ({
+      index: word.index,
+      word: word.word,
+      start: word.start,
+      end: word.end,
+    })),
+  });
+}
+
+function normalizeTranscriptWords(value: unknown): TranscriptWord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((word, fallbackIndex) => {
+    if (
+      !isRecord(word) ||
+      typeof word.word !== 'string' ||
+      typeof word.start !== 'number' ||
+      typeof word.end !== 'number'
+    ) {
+      return [];
+    }
+
+    return {
+      index: typeof word.index === 'number' ? word.index : fallbackIndex,
+      word: word.word.trim(),
+      start: word.start,
+      end: word.end,
+    };
+  }).filter((word) => word.word.length > 0);
+}
+
+function createCardTimestampFields(card: DraftCard, transcriptWords: TranscriptWord[]) {
+  const startIndex = card.sourceWordStartIndex;
+  const endIndex = card.sourceWordEndIndex;
+
+  if (
+    typeof startIndex !== 'number' ||
+    typeof endIndex !== 'number' ||
+    startIndex < 0 ||
+    endIndex < startIndex ||
+    endIndex >= transcriptWords.length
+  ) {
+    return {
+      source_word_start_index: null,
+      source_word_end_index: null,
+      audio_start_sec: null,
+      audio_end_sec: null,
+    };
+  }
+
+  const startWord = transcriptWords[startIndex];
+  const endWord = transcriptWords[endIndex];
+
+  if (
+    typeof startWord?.start !== 'number' ||
+    typeof endWord?.end !== 'number' ||
+    endWord.end < startWord.start
+  ) {
+    return {
+      source_word_start_index: null,
+      source_word_end_index: null,
+      audio_start_sec: null,
+      audio_end_sec: null,
+    };
+  }
+
+  return {
+    source_word_start_index: startIndex,
+    source_word_end_index: endIndex,
+    audio_start_sec: startWord.start,
+    audio_end_sec: endWord.end,
+  };
+}
+
+function createDraftInstructions(generationMode: GenerationMode, hasTranscriptWords: boolean) {
   const commonInstructions = [
     'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
-    '入力は日本語の文字起こし、またはユーザーが書いた日本語の日記本文です。',
+    '入力は JSON です。plainText は日本語の文字起こし、またはユーザーが書いた日本語の日記本文です。',
+    'transcriptWords は音声文字起こしの word timestamp 配列です。各要素は index, word, start, end を持ちます。',
     'あなたの仕事は、日記として読み返せる polishedText と、後で英語カード化するための日本語カード案を作ることです。',
     'polishedText は日記タブの「読みやすく」表示にそのまま出す日本語本文です。',
     'polishedText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
     'polishedText は入力をそのまま長く整えるのではなく、適度に簡潔な日記文にしてください。',
-    'bulletPoints は日記タブの「箇条書き」表示にそのまま出す短い日本語メモ配列です。',
-    'bulletPoints は最低1個、上限なしです。内容に応じて必要な数だけ返してください。',
+    'bulletPoints は日記タブの「箇条書き」表示にそのまま出す、日本語の要旨メモ配列です。',
+    'bulletPoints はカード分割ではありません。原文の文ごとに1項目へ分けないでください。',
+    'bulletPoints の個数は、独立した要点の数だけにしてください。近い内容、言い直し、同じ話題の補足は1つに統合してください。',
     'bulletPoints は空文字、見出し、番号、先頭の記号を含めないでください。',
-    'bulletPoints は出来事、感情、気づき、次に覚えておきたいことを、本人があとで見返す短い日記メモとして書いてください。',
+    'bulletPoints は原文をそのまま抜き出さず、出来事、迷い、判断、結果、感情の芯だけを本人があとで見返す短い日記メモに圧縮してください。',
+    'bulletPoints は長く説明せず、メモとして自然な短い言い切りにしてください。',
     'bulletPoints でも新しい解釈、アドバイス、事実、理由、感情を足さないでください。',
     '同じ気持ちや状況を繰り返している部分、意味の薄い補足、口癖、言い直しは削ってください。',
     '元の出来事、感情、温度感、主観の芯は保ってください。',
     '事実、理由、感情を新しく足さないでください。必要な意味まで削りすぎないでください。',
     '長い入力は、主な出来事と感情が伝わる程度に自然に圧縮してください。目安は入力の半分から7割程度です。',
-    '短い入力は無理に短くしなくて構いません。',
+    '短い入力でも、bulletPoints は必要最小限にしてください。原文の各文をそのまま並べないでください。',
     'カード案は日本語だけを返してください。英語はまだ返さないでください。',
     'ただし分割判断は、日本語としての句点や話し言葉の切れ目ではなく、英語にした後の自然な一文を逆算して決めてください。',
     '各 cards[].japanese は、後で1つの自然な英語文に対応する意味の塊だけを入れてください。',
+    '各カードには sourceWordStartIndex と sourceWordEndIndex も必ず返してください。',
+    hasTranscriptWords
+      ? 'sourceWordStartIndex/sourceWordEndIndex は、その cards[].japanese の意味に対応する transcriptWords の inclusive な index 範囲です。対応が不確実な場合だけ null にしてください。'
+      : 'transcriptWords が空の場合、sourceWordStartIndex/sourceWordEndIndex は必ず null にしてください。',
     '文の途中で不自然に切らず、英語カード化したときに主語、述語、意味が自然に成立する単位にしてください。',
     'カード数に上限はありません。無理に増やさず、自然に分けられる分だけ返してください。',
   ];
@@ -303,6 +416,10 @@ function createDraftInstructions(generationMode: GenerationMode) {
         ];
 
   return [...commonInstructions, ...modeInstructions].join('\n');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function normalizeDiaryText(value: string, fallbackText: string) {
@@ -335,6 +452,7 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     plain_text: diaryEntry.plain_text,
     polished_text: diaryEntry.polished_text,
     bullet_points: diaryEntry.bullet_points,
+    transcript_words: diaryEntry.transcript_words,
     created_at: diaryEntry.created_at,
   };
 }

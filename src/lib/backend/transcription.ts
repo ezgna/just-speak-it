@@ -5,9 +5,17 @@ import { Platform } from 'react-native';
 import { ensureAnonymousSession } from '@/lib/backend/auth';
 import { requireSupabaseClient, supabasePublishableKey, supabaseUrl } from '@/lib/supabase/client';
 
-type TranscriptionResponse = {
+export type TranscriptionWord = {
+  index: number;
+  word: string;
+  start: number;
+  end: number;
+};
+
+export type TranscriptionResponse = {
   rawText: string;
   cleanedText: string;
+  words: TranscriptionWord[];
 };
 
 export type TranscriptionComparisonSegment = {
@@ -81,7 +89,11 @@ export async function transcribeRecording(recordingUri: string) {
     throw new Error('文字起こし結果が空でした。');
   }
 
-  return data;
+  return {
+    rawText: data.rawText,
+    cleanedText: data.cleanedText,
+    words: normalizeTranscriptionWords(data.words),
+  };
 }
 
 export async function compareTranscriptionModels(recordingUri: string) {
@@ -156,4 +168,32 @@ function parseJson<T>(value: string): T | null {
   } catch {
     return null;
   }
+}
+
+function normalizeTranscriptionWords(value: unknown): TranscriptionWord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((word, fallbackIndex) => {
+    if (
+      !isRecord(word) ||
+      typeof word.word !== 'string' ||
+      typeof word.start !== 'number' ||
+      typeof word.end !== 'number'
+    ) {
+      return [];
+    }
+
+    return {
+      index: 'index' in word && typeof word.index === 'number' ? word.index : fallbackIndex,
+      word: word.word,
+      start: word.start,
+      end: word.end,
+    };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }

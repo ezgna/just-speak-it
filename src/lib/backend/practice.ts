@@ -1,4 +1,5 @@
 import { ensureAnonymousSession } from '@/lib/backend/auth';
+import type { TranscriptionWord } from '@/lib/backend/transcription';
 import { type GenerationMode } from '@/lib/generation-mode';
 import { requireSupabaseClient } from '@/lib/supabase/client';
 
@@ -8,6 +9,10 @@ export type TranslationCard = {
   sortOrder: number;
   japanese: string;
   english: string;
+  sourceWordStartIndex: number | null;
+  sourceWordEndIndex: number | null;
+  audioStartSec: number | null;
+  audioEndSec: number | null;
   createdAt?: string;
 };
 
@@ -19,6 +24,10 @@ export type PracticeDraftCard = {
   sortOrder: number;
   japanese: string;
   english: null;
+  sourceWordStartIndex: number | null;
+  sourceWordEndIndex: number | null;
+  audioStartSec: number | null;
+  audioEndSec: number | null;
   createdAt?: string;
 };
 
@@ -29,6 +38,7 @@ export type PracticeDiaryEntry = {
   plainText: string;
   polishedText: string;
   bulletPoints: string[];
+  transcriptWords: TranscriptionWord[];
   createdAt: string;
 };
 
@@ -69,6 +79,10 @@ type TranslationCardRow = {
   sort_order: number;
   japanese: string;
   english: string | null;
+  source_word_start_index: number | null;
+  source_word_end_index: number | null;
+  audio_start_sec: number | null;
+  audio_end_sec: number | null;
   created_at?: string;
 };
 
@@ -89,6 +103,7 @@ type DiaryEntryRow = {
   plain_text: string;
   polished_text: string;
   bullet_points: unknown;
+  transcript_words?: unknown;
   created_at: string;
 };
 
@@ -114,6 +129,7 @@ export type PreparePracticeDraftParams = {
   source: 'text' | 'voice';
   rawTranscriptText?: string;
   cleanedText?: string;
+  transcriptWords?: TranscriptionWord[];
 };
 
 type PracticeFunctionDiaryEntry = {
@@ -123,6 +139,7 @@ type PracticeFunctionDiaryEntry = {
   plain_text: string;
   polished_text: string;
   bullet_points?: unknown;
+  transcript_words?: unknown;
   created_at: string;
 };
 
@@ -151,12 +168,16 @@ export type CompletePracticeResponse = {
   cards: TranslationCardRow[];
 };
 
+const translationCardSelect =
+  'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
+
 export async function preparePracticeDraft({
   diaryText,
   generationMode = 'compact',
   source,
   rawTranscriptText,
   cleanedText,
+  transcriptWords,
 }: PreparePracticeDraftParams) {
   await ensureAnonymousSession();
 
@@ -170,6 +191,7 @@ export async function preparePracticeDraft({
         source,
         rawTranscriptText,
         cleanedText,
+        transcriptWords: source === 'voice' ? transcriptWords ?? [] : [],
       },
     }
   );
@@ -236,7 +258,7 @@ export async function getLatestPracticeDraft() {
 
   const { data: diaryEntry, error: diaryError } = await supabase
     .from('diary_entries')
-    .select('id, source, original_text, plain_text, polished_text, bullet_points, created_at')
+    .select('id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, created_at')
     .eq('id', generation.diary_entry_id)
     .maybeSingle();
 
@@ -250,7 +272,7 @@ export async function getLatestPracticeDraft() {
 
   const { data: cards, error: cardsError } = await supabase
     .from('translation_cards')
-    .select('id, practice_generation_id, sort_order, japanese, english, created_at')
+    .select(translationCardSelect)
     .eq('practice_generation_id', generation.id)
     .order('sort_order', { ascending: true });
 
@@ -366,7 +388,7 @@ export async function listDiaryEntries() {
 
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
-    .select('id, source, original_text, plain_text, polished_text, bullet_points, created_at')
+    .select('id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, created_at')
     .in('id', diaryEntryIds);
 
   if (entriesError) {
@@ -425,7 +447,7 @@ export async function listTranslationCardGroups() {
 
   const { data, error } = await supabase
     .from('translation_cards')
-    .select('id, practice_generation_id, sort_order, japanese, english, created_at')
+    .select(translationCardSelect)
     .in('practice_generation_id', practiceGenerationIds)
     .order('sort_order', { ascending: true });
 
@@ -524,6 +546,10 @@ function mapTranslationCard(card: TranslationCardRow): TranslationCard {
     sortOrder: card.sort_order,
     japanese: card.japanese,
     english: card.english ?? '',
+    sourceWordStartIndex: card.source_word_start_index,
+    sourceWordEndIndex: card.source_word_end_index,
+    audioStartSec: card.audio_start_sec,
+    audioEndSec: card.audio_end_sec,
     createdAt: card.created_at,
   };
 }
@@ -541,6 +567,10 @@ function mapCompletedTranslationCard(card: TranslationCardRow): TranslationCard 
     sortOrder: card.sort_order,
     japanese: card.japanese,
     english,
+    sourceWordStartIndex: card.source_word_start_index,
+    sourceWordEndIndex: card.source_word_end_index,
+    audioStartSec: card.audio_start_sec,
+    audioEndSec: card.audio_end_sec,
     createdAt: card.created_at,
   };
 }
@@ -552,6 +582,10 @@ function mapPracticeDraftCard(card: TranslationCardRow): PracticeDraftCard {
     sortOrder: card.sort_order,
     japanese: card.japanese,
     english: null,
+    sourceWordStartIndex: card.source_word_start_index,
+    sourceWordEndIndex: card.source_word_end_index,
+    audioStartSec: card.audio_start_sec,
+    audioEndSec: card.audio_end_sec,
     createdAt: card.created_at,
   };
 }
@@ -564,6 +598,7 @@ function mapPracticeFunctionDiaryEntry(entry: PracticeFunctionDiaryEntry): Pract
     plainText: normalizeDiaryBodyText(entry.plain_text),
     polishedText: normalizeDiaryBodyText(entry.polished_text),
     bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
+    transcriptWords: normalizeTranscriptWords(entry.transcript_words),
     createdAt: entry.created_at,
   };
 }
@@ -576,8 +611,37 @@ function mapPracticeDiaryEntry(entry: DiaryEntryRow): PracticeDiaryEntry {
     plainText: normalizeDiaryBodyText(entry.plain_text),
     polishedText: normalizeDiaryBodyText(entry.polished_text),
     bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
+    transcriptWords: normalizeTranscriptWords(entry.transcript_words),
     createdAt: entry.created_at,
   };
+}
+
+function normalizeTranscriptWords(value: unknown): TranscriptionWord[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((word, fallbackIndex) => {
+    if (
+      !isRecord(word) ||
+      typeof word.word !== 'string' ||
+      typeof word.start !== 'number' ||
+      typeof word.end !== 'number'
+    ) {
+      return [];
+    }
+
+    return {
+      index: 'index' in word && typeof word.index === 'number' ? word.index : fallbackIndex,
+      word: word.word,
+      start: word.start,
+      end: word.end,
+    };
+  });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
 }
 
 function normalizeBulletPoints(value: unknown, fallbackText: string) {

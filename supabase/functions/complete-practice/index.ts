@@ -26,6 +26,7 @@ type DiaryEntryRow = {
   plain_text: string;
   polished_text: string;
   bullet_points: unknown;
+  transcript_words: unknown;
   content_hash: string;
   created_at: string;
   updated_at: string;
@@ -48,6 +49,10 @@ type TranslationCardRow = {
   sort_order: number;
   japanese: string;
   english: string | null;
+  source_word_start_index: number | null;
+  source_word_end_index: number | null;
+  audio_start_sec: number | null;
+  audio_end_sec: number | null;
   created_at?: string;
 };
 
@@ -73,10 +78,11 @@ const translationSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
-const translationCardSelect = 'id, practice_generation_id, sort_order, japanese, english, created_at';
+const translationCardSelect =
+  'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
 
 export default {
   async fetch(req: Request) {
@@ -206,6 +212,14 @@ export default {
         .update({
           japanese: card.japanese,
           english,
+          ...(card.shouldClearTimestamp
+            ? {
+                source_word_start_index: null,
+                source_word_end_index: null,
+                audio_start_sec: null,
+                audio_end_sec: null,
+              }
+            : {}),
         })
         .eq('id', card.id)
         .eq('practice_generation_id', generation.id);
@@ -307,6 +321,7 @@ function mergeEditedCards(
       practice_generation_id: card.practice_generation_id,
       sort_order: card.sort_order,
       japanese: input.japanese,
+      shouldClearTimestamp: input.japanese !== card.japanese,
     };
   });
 
@@ -321,6 +336,7 @@ function mergeEditedCards(
       practice_generation_id: string;
       sort_order: number;
       japanese: string;
+      shouldClearTimestamp: boolean;
     }[],
   };
 }
@@ -434,6 +450,7 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     plain_text: diaryEntry.plain_text,
     polished_text: diaryEntry.polished_text,
     bullet_points: diaryEntry.bullet_points,
+    transcript_words: diaryEntry.transcript_words,
     created_at: diaryEntry.created_at,
   };
 }

@@ -2,6 +2,7 @@ import type { TranslationCard, TranslationCardGroup } from '@/lib/backend/practi
 import type { CardLearningStatus } from '@/lib/card-learning-statuses';
 
 export type PracticeCard = TranslationCard & {
+  diaryEntryId: TranslationCardGroup['diaryEntryId'];
   diaryText: string;
   diaryExcerpt: string;
   diaryCreatedAt: string;
@@ -19,6 +20,7 @@ export function flattenTranslationCardGroups(groups: TranslationCardGroup[]): Pr
   return groups.flatMap((group) =>
     group.cards.map((card) => ({
       ...card,
+      diaryEntryId: group.diaryEntryId,
       diaryText: group.diaryText,
       diaryExcerpt: group.diaryExcerpt,
       diaryCreatedAt: group.createdAt,

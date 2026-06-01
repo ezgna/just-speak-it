@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { EnglishPracticeDeck } from '@/components/english-practice-deck';
 import { ThemedText } from '@/components/themed-text';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useTranslationCardGroups } from '@/hooks/use-translation-card-groups';
 
 export default function EnglishScreen() {
@@ -15,12 +15,11 @@ export default function EnglishScreen() {
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
       style={[styles.scrollView, { backgroundColor: palette.background }]}
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: safeAreaInsets.top,
+          paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
           paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),

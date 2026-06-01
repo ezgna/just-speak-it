@@ -1,6 +1,7 @@
 import { StyleSheet, View } from 'react-native';
 
 import { useDailyPalette } from '@/components/just-speak-it-ui';
+import { LocalRecordingPlayButton } from '@/components/local-recording-play-button';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import type { TranslationCardGroup } from '@/lib/backend/practice';
@@ -38,13 +39,28 @@ function EnglishPracticeLine({
 }) {
   const palette = useDailyPalette();
   const tabColor = TimecodeColors[index % TimecodeColors.length];
+  const timecode =
+    typeof card.audioStartSec === 'number' ? formatTranscriptTime(card.audioStartSec) : null;
 
   return (
     <View style={styles.transcriptRow}>
-      {index > 0 ? (
+      {timecode ? (
         <View style={styles.separator}>
+          <LocalRecordingPlayButton
+            diaryEntryId={card.diaryEntryId}
+            audioStartSec={card.audioStartSec}
+            audioEndSec={card.audioEndSec}
+            size={32}
+            iconSize={15}
+            backgroundColor="#FFFFFF"
+            activeBackgroundColor={tabColor}
+            borderColor={InkColor}
+            tintColor={InkColor}
+            activeTintColor={InkColor}
+            style={styles.timecodeAudioButton}
+          />
           <View style={[styles.timecodeTab, { backgroundColor: tabColor }]}>
-            <ThemedText style={styles.timecodeText}>{formatTranscriptTime(index)}</ThemedText>
+            <ThemedText style={styles.timecodeText}>{timecode}</ThemedText>
           </View>
           <View style={[styles.rule, { backgroundColor: palette.border }]} />
         </View>
@@ -62,8 +78,8 @@ function EnglishPracticeLine({
   );
 }
 
-function formatTranscriptTime(index: number) {
-  const totalSeconds = index + 1;
+function formatTranscriptTime(value: number) {
+  const totalSeconds = Math.max(0, Math.floor(value));
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 
@@ -80,6 +96,9 @@ const styles = StyleSheet.create({
   separator: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  timecodeAudioButton: {
+    marginRight: Spacing.one,
   },
   timecodeTab: {
     minWidth: 56,

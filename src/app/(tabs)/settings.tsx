@@ -4,9 +4,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { GenerationModeSelector } from '@/components/generation-mode-selector';
 import { useDailyPalette } from '@/components/just-speak-it-ui';
+import { LocalRecordingSettings } from '@/components/local-recording-settings';
 import { ThemePreferenceSelector } from '@/components/theme-preference-selector';
 import { GlideButton } from '@/components/ui/glide-button';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 
 export default function SettingsScreen() {
   const safeAreaInsets = useSafeAreaInsets();
@@ -14,12 +15,11 @@ export default function SettingsScreen() {
 
   return (
     <ScrollView
-      contentInsetAdjustmentBehavior="automatic"
       style={[styles.screen, { backgroundColor: palette.background }]}
       contentContainerStyle={[
         styles.content,
         {
-          paddingTop: safeAreaInsets.top + Spacing.three,
+          paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
           paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
@@ -57,6 +57,7 @@ export default function SettingsScreen() {
 
         <ThemePreferenceSelector />
         <GenerationModeSelector />
+        <LocalRecordingSettings />
       </View>
     </ScrollView>
   );

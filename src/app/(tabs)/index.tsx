@@ -15,7 +15,7 @@ import { GeneratedPracticePreview } from '@/components/generated-practice-previe
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideTextInput } from '@/components/ui/glide-text-input';
-import { MaxContentWidth, Spacing } from '@/constants/theme';
+import { MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useGenerationMode } from '@/hooks/use-generation-mode';
 import {
   completePracticeDraft,
@@ -28,7 +28,20 @@ import {
 } from '@/lib/backend/practice';
 import { setHapticsAllowedDuringRecording } from '@/lib/audio-session-haptics';
 import { notifyPracticeChanged } from '@/lib/practice-refresh';
-import { transcribeRecording } from '@/lib/backend/transcription';
+import { transcribeRecording, type TranscriptionWord } from '@/lib/backend/transcription';
+import {
+  clearLocalRecordingError,
+  deleteLocalRecording,
+  finishLocalRecordingAfterTranscription,
+  getLatestFailedRetryRecording,
+  getLocalRecording,
+  getLocalRecordingUri,
+  isLocalRecordingSaveEnabled,
+  isLocalRecordingSupported,
+  markLocalRecordingFailed,
+  saveLocalRecordingFromUri,
+  type LocalRecording,
+} from '@/lib/local-recordings';
 
 type DiaryDraftSource = 'text' | 'voice';
 type EntryMode = 'voice' | 'write';
@@ -54,7 +67,10 @@ export default function HomeScreen() {
   const [isPreparingDraft, setIsPreparingDraft] = useState(false);
   const [isCompletingPractice, setIsCompletingPractice] = useState(false);
   const [rawTranscriptText, setRawTranscriptText] = useState<string | null>(null);
+  const [transcriptWords, setTranscriptWords] = useState<TranscriptionWord[]>([]);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
+  const [retryRecordingId, setRetryRecordingId] = useState<string | null>(null);
+  const [pendingLocalRecordingId, setPendingLocalRecordingId] = useState<string | null>(null);
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [activeDraft, setActiveDraft] = useState<PracticeDraft | null>(null);
   const [draftCards, setDraftCards] = useState<PracticeDraftCard[]>([]);
@@ -112,18 +128,35 @@ export default function HomeScreen() {
     draftInteractionVersionRef.current += 1;
   }, []);
 
+  const clearRetryRecordingAction = useCallback(() => {
+    setRetryRecordingId((currentRecordingId) => {
+      discardRetryOnlyRecording(currentRecordingId);
+      return null;
+    });
+  }, []);
+
+  const clearPendingLocalRecordingAction = useCallback(() => {
+    setPendingLocalRecordingId((currentRecordingId) => {
+      discardRetryOnlyRecording(currentRecordingId);
+      return null;
+    });
+  }, []);
+
   const resetDraftState = useCallback(() => {
     markDraftInteraction();
+    clearRetryRecordingAction();
+    clearPendingLocalRecordingAction();
     setEntryMode('voice');
     setDiaryDraftText('');
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
+    setTranscriptWords([]);
     setTranscriptionError(null);
     setGenerationError(null);
     setActiveDraft(null);
     setDraftCards([]);
     setCompletedPracticeCards([]);
-  }, [markDraftInteraction]);
+  }, [clearPendingLocalRecordingAction, clearRetryRecordingAction, markDraftInteraction]);
 
   const applyPracticeDraft = useCallback((draft: PracticeDraft) => {
     setActiveDraft(draft);
@@ -132,6 +165,7 @@ export default function HomeScreen() {
     setDiaryDraftText(draft.diaryEntry.plainText);
     setDiaryDraftSource(draft.source);
     setRawTranscriptText(draft.source === 'voice' ? draft.diaryEntry.originalText : null);
+    setTranscriptWords(draft.source === 'voice' ? draft.diaryEntry.transcriptWords : []);
     setTranscriptionError(null);
     setGenerationError(null);
   }, []);
@@ -183,8 +217,29 @@ export default function HomeScreen() {
     };
   }, [applyPracticeDraft, generationMode]);
 
+  useEffect(() => {
+    const failedRetryRecording = getLatestFailedRetryRecording();
+
+    if (!failedRetryRecording) {
+      return;
+    }
+
+    const frameId = requestAnimationFrame(() => {
+      setRetryRecordingId(failedRetryRecording.id);
+      setTranscriptionError(
+        failedRetryRecording.lastError ?? '前回の録音を文字起こしできませんでした。'
+      );
+    });
+
+    return () => {
+      cancelAnimationFrame(frameId);
+    };
+  }, []);
+
   async function startRecording() {
     markDraftInteraction();
+    clearRetryRecordingAction();
+    clearPendingLocalRecordingAction();
     setEntryMode('voice');
     setIsRecordingBusy(true);
     setRecordingIntentActive(true);
@@ -211,6 +266,7 @@ export default function HomeScreen() {
       setDiaryDraftText('');
       setDiaryDraftSource('voice');
       setRawTranscriptText(null);
+      setTranscriptWords([]);
       setActiveDraft(null);
       setDraftCards([]);
       setCompletedPracticeCards([]);
@@ -227,10 +283,11 @@ export default function HomeScreen() {
   }
 
   async function stopRecording() {
+    const stoppedDurationMillis = recorderState.durationMillis;
     setRecordingIntentActive(false);
     setIsRecordingBusy(true);
     setIsStoppingRecording(true);
-    setRecordingStopDurationMillis(recorderState.durationMillis);
+    setRecordingStopDurationMillis(stoppedDurationMillis);
     setTranscriptionError(null);
 
     let recordingUri: string | null = null;
@@ -263,17 +320,55 @@ export default function HomeScreen() {
     }
 
     if (recordingUri) {
-      await handleTranscription(recordingUri);
+      const localRecording = await saveRecordingForTranscription({
+        durationMillis: stoppedDurationMillis,
+        recordingUri,
+      });
+      const transcriptionUri =
+        localRecording ? getLocalRecordingUri(localRecording.id) ?? recordingUri : recordingUri;
+
+      await handleTranscription(transcriptionUri, localRecording?.id ?? null);
     }
   }
 
-  async function handleTranscription(recordingUri: string) {
+  async function saveRecordingForTranscription({
+    durationMillis,
+    recordingUri,
+  }: {
+    durationMillis: number;
+    recordingUri: string;
+  }): Promise<LocalRecording | null> {
+    if (!isLocalRecordingSupported()) {
+      return null;
+    }
+
+    try {
+      return await saveLocalRecordingFromUri({
+        durationMillis,
+        recordingUri,
+        retention: isLocalRecordingSaveEnabled() ? 'persistent' : 'retry',
+      });
+    } catch (error) {
+      setGenerationError(
+        error instanceof Error ? error.message : '録音ファイルを端末に保存できませんでした。'
+      );
+      return null;
+    }
+  }
+
+  async function handleTranscription(recordingUri: string, localRecordingId: string | null = null) {
     setIsTranscribing(true);
+
+    if (localRecordingId) {
+      clearLocalRecordingError(localRecordingId);
+      setRetryRecordingId(null);
+    }
 
     try {
       const transcript = await transcribeRecording(recordingUri);
       const cleanedText = transcript.cleanedText.trim();
       setRawTranscriptText(cleanedText ? transcript.rawText : null);
+      setTranscriptWords(cleanedText ? transcript.words : []);
       setDiaryDraftText(cleanedText);
       setDiaryDraftSource(cleanedText ? 'voice' : 'text');
       setActiveDraft(null);
@@ -281,17 +376,29 @@ export default function HomeScreen() {
       setCompletedPracticeCards([]);
       setIsTranscribing(false);
 
+      if (localRecordingId) {
+        setPendingLocalRecordingId(localRecordingId);
+      }
+
       if (cleanedText) {
         await handlePrepareDraft({
           diaryText: cleanedText,
           source: 'voice',
           rawTranscriptText: transcript.rawText,
+          transcriptWords: transcript.words,
+          localRecordingId,
         });
       }
     } catch (error) {
-      setTranscriptionError(
-        error instanceof Error ? error.message : '音声の読み取りに失敗しました。'
-      );
+      const errorMessage =
+        error instanceof Error ? error.message : '音声の読み取りに失敗しました。';
+
+      setTranscriptionError(errorMessage);
+
+      if (localRecordingId) {
+        markLocalRecordingFailed(localRecordingId, errorMessage);
+        setRetryRecordingId(localRecordingId);
+      }
     } finally {
       setIsTranscribing(false);
       setWritingPressHeld(false);
@@ -302,10 +409,14 @@ export default function HomeScreen() {
     diaryText,
     source,
     rawTranscriptText: nextRawTranscriptText,
+    transcriptWords: nextTranscriptWords,
+    localRecordingId,
   }: {
     diaryText: string;
     source: DiaryDraftSource;
     rawTranscriptText?: string | null;
+    transcriptWords?: TranscriptionWord[];
+    localRecordingId?: string | null;
   }) {
     markDraftInteraction();
     const normalizedDiaryText = diaryText.trim();
@@ -317,7 +428,7 @@ export default function HomeScreen() {
       generationInFlightRef.current ||
       hasActiveDraft
     ) {
-      return;
+      return null;
     }
 
     generationInFlightRef.current = true;
@@ -334,13 +445,30 @@ export default function HomeScreen() {
         cleanedText: normalizedDiaryText,
         rawTranscriptText:
           source === 'voice' ? nextRawTranscriptText ?? normalizedDiaryText : normalizedDiaryText,
+        transcriptWords: source === 'voice' ? nextTranscriptWords ?? transcriptWords : [],
         generationMode,
       });
       applyPracticeDraft(draft);
+
+      if (localRecordingId) {
+        await finishLocalRecordingAfterTranscription({
+          id: localRecordingId,
+          diaryEntryId: draft.diaryEntry.id,
+        });
+        setPendingLocalRecordingId((currentRecordingId) =>
+          currentRecordingId === localRecordingId ? null : currentRecordingId
+        );
+        setRetryRecordingId((currentRecordingId) =>
+          currentRecordingId === localRecordingId ? null : currentRecordingId
+        );
+      }
+
+      return draft;
     } catch (error) {
       setGenerationError(
         error instanceof Error ? error.message : '分割カードの作成に失敗しました。'
       );
+      return null;
     } finally {
       generationInFlightRef.current = false;
       setIsPreparingDraft(false);
@@ -375,6 +503,7 @@ export default function HomeScreen() {
       setDraftCards([]);
       setDiaryDraftText(practice.diaryEntry.plainText);
       setDiaryDraftSource(practice.source);
+      setTranscriptWords(practice.source === 'voice' ? practice.diaryEntry.transcriptWords : []);
       notifyPracticeChanged();
     } catch (error) {
       setGenerationError(
@@ -384,6 +513,23 @@ export default function HomeScreen() {
       generationInFlightRef.current = false;
       setIsCompletingPractice(false);
     }
+  }
+
+  async function handleRetryTranscription() {
+    if (!retryRecordingId || isWorking) {
+      return;
+    }
+
+    const retryRecordingUri = getLocalRecordingUri(retryRecordingId);
+
+    if (!retryRecordingUri) {
+      setTranscriptionError('保存済み録音を読み込めませんでした。もう一度録音してください。');
+      await deleteLocalRecording(retryRecordingId);
+      setRetryRecordingId(null);
+      return;
+    }
+
+    await handleTranscription(retryRecordingUri, retryRecordingId);
   }
 
   async function handlePrimaryActionPress() {
@@ -411,6 +557,8 @@ export default function HomeScreen() {
         diaryText: diaryDraftText,
         source: diaryDraftSource,
         rawTranscriptText,
+        transcriptWords,
+        localRecordingId: diaryDraftSource === 'voice' ? pendingLocalRecordingId : null,
       });
       return;
     }
@@ -439,12 +587,14 @@ export default function HomeScreen() {
 
   function handleDraftTextChange(nextText: string) {
     markDraftInteraction();
+    clearRetryRecordingAction();
 
     if (!rawTranscriptText || !nextText.trim()) {
       setRawTranscriptText(null);
       setDiaryDraftSource('text');
     }
 
+    setTranscriptWords([]);
     setDiaryDraftText(nextText);
     setTranscriptionError(null);
     setGenerationError(null);
@@ -455,10 +605,13 @@ export default function HomeScreen() {
 
   function handleEnterWriteMode() {
     markDraftInteraction();
+    clearRetryRecordingAction();
+    clearPendingLocalRecordingAction();
     Keyboard.dismiss();
     setEntryMode('write');
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
+    setTranscriptWords([]);
     setTranscriptionError(null);
     setGenerationError(null);
     setActiveDraft(null);
@@ -477,7 +630,7 @@ export default function HomeScreen() {
       style={[
         styles.modeActionLayer,
         {
-          top: safeAreaInsets.top + Spacing.three,
+          top: safeAreaInsets.top + TopTabInset + Spacing.three,
           right: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
@@ -497,7 +650,7 @@ export default function HomeScreen() {
       style={[
         styles.modeActionLayer,
         {
-          top: safeAreaInsets.top + Spacing.three,
+          top: safeAreaInsets.top + TopTabInset + Spacing.three,
           right: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
@@ -525,9 +678,23 @@ export default function HomeScreen() {
       ]}>
       <View style={styles.draftStack}>
         {transcriptionError && (
-          <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
-            {transcriptionError}
-          </ThemedText>
+          <View style={styles.errorStack}>
+            <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
+              {transcriptionError}
+            </ThemedText>
+            {retryRecordingId ? (
+              <GlideButton
+                label="再試行"
+                accessibilityLabel="同じ録音でもう一度文字起こしする"
+                icon={{ ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' }}
+                tone="orange"
+                size="compact"
+                fullWidth={false}
+                disabled={isWorking}
+                onPress={handleRetryTranscription}
+              />
+            ) : null}
+          </View>
         )}
 
         {hasActiveDraft ? (
@@ -643,7 +810,7 @@ export default function HomeScreen() {
         styles.screen,
         {
           backgroundColor: palette.background,
-          paddingTop: safeAreaInsets.top,
+          paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
           paddingBottom: safeAreaInsets.bottom + Spacing.three,
           paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
           paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
@@ -677,6 +844,18 @@ function formatDuration(durationMillis: number) {
 
 async function setRecordingHapticsAllowed(allowed: boolean) {
   await setHapticsAllowedDuringRecording(allowed).catch(() => undefined);
+}
+
+function discardRetryOnlyRecording(recordingId: string | null) {
+  if (!recordingId) {
+    return;
+  }
+
+  const recording = getLocalRecording(recordingId);
+
+  if (recording?.retention === 'retry') {
+    void deleteLocalRecording(recordingId);
+  }
 }
 
 const styles = StyleSheet.create({
@@ -727,6 +906,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 24,
     fontWeight: 600,
+  },
+  errorStack: {
+    alignItems: 'flex-start',
+    gap: Spacing.two,
   },
   buttonDock: {
     width: '100%',

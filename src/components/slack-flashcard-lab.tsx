@@ -23,8 +23,9 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { LocalRecordingPlayButton } from '@/components/local-recording-play-button';
 import { ThemedText } from '@/components/themed-text';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useCardLearningStatuses } from '@/hooks/use-card-learning-statuses';
 import type { TranslationCardGroup } from '@/lib/backend/practice';
 import {
@@ -103,13 +104,13 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
     Math.max(safeAreaInsets.left, Spacing.three) +
     Math.max(safeAreaInsets.right, Spacing.three);
   const verticalReservedSpace =
-    safeAreaInsets.top + safeAreaInsets.bottom + BottomTabInset + 252;
+    safeAreaInsets.top + TopTabInset + safeAreaInsets.bottom + BottomTabInset + 252;
   const cardWidth = Math.min(width - horizontalPadding, 560);
   const cardHeight = Math.min(Math.max(height - verticalReservedSpace, 360), 540);
   const swipeThreshold = Math.max(88, cardWidth * 0.22);
   const swipeOutDistance = width + 180;
   const rootInsets = {
-    paddingTop: safeAreaInsets.top + Spacing.two,
+    paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
     paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
     paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
     paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
@@ -855,6 +856,10 @@ const SlackCardFace = memo(function SlackCardFace({
       onError: () => setIsSpeaking(false),
     });
   }, [card.english, isSpeaking]);
+  const handleLocalRecordingPlayStart = useCallback(() => {
+    void Speech.stop();
+    setIsSpeaking(false);
+  }, []);
   const tapGesture = useMemo(
     () =>
       Gesture.Tap()
@@ -889,29 +894,45 @@ const SlackCardFace = memo(function SlackCardFace({
         </GestureDetector>
 
         {!isPreview && isAnswerVisible ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="英語を読み上げる"
-            hitSlop={8}
-            onPress={handleSpeakPress}
-            style={({ pressed }) => [
-              styles.soundButton,
-              styles.soundButtonFloating,
-              {
-                backgroundColor: isSpeaking ? LabColors.green : LabColors.cardTint,
-                opacity: pressed ? 0.72 : 1,
-              },
-            ]}>
-            <SymbolView
-              name={{
-                ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
-                android: 'volume_up',
-                web: 'volume_up',
-              }}
-              size={18}
-              tintColor={isSpeaking ? LabColors.white : LabColors.text}
+          <>
+            <LocalRecordingPlayButton
+              diaryEntryId={card.diaryEntryId}
+              audioStartSec={card.audioStartSec}
+              audioEndSec={card.audioEndSec}
+              size={40}
+              iconSize={18}
+              backgroundColor={LabColors.cardTint}
+              activeBackgroundColor={LabColors.green}
+              borderColor="rgba(29, 28, 29, 0.14)"
+              tintColor={LabColors.text}
+              activeTintColor={LabColors.white}
+              style={[styles.soundButtonFloating, styles.sourceSoundButtonFloating]}
+              onPlayStart={handleLocalRecordingPlayStart}
             />
-          </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="英語を読み上げる"
+              hitSlop={8}
+              onPress={handleSpeakPress}
+              style={({ pressed }) => [
+                styles.soundButton,
+                styles.soundButtonFloating,
+                {
+                  backgroundColor: isSpeaking ? LabColors.green : LabColors.cardTint,
+                  opacity: pressed ? 0.72 : 1,
+                },
+              ]}>
+              <SymbolView
+                name={{
+                  ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
+                  android: 'volume_up',
+                  web: 'volume_up',
+                }}
+                size={18}
+                tintColor={isSpeaking ? LabColors.white : LabColors.text}
+              />
+            </Pressable>
+          </>
         ) : null}
       </View>
     </View>
@@ -1221,6 +1242,9 @@ const styles = StyleSheet.create({
     top: Spacing.three,
     right: Spacing.three,
     zIndex: 2,
+  },
+  sourceSoundButtonFloating: {
+    right: Spacing.three + 48,
   },
   decisionOverlay: {
     position: 'absolute',

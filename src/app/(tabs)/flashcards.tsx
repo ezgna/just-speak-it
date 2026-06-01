@@ -6,7 +6,7 @@ import {
 
 import { SlackFlashcardLab } from '@/components/slack-flashcard-lab';
 import { ThemedText } from '@/components/themed-text';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useTranslationCardGroups } from '@/hooks/use-translation-card-groups';
 
 export default function FlashcardsScreen() {
@@ -63,7 +63,7 @@ export default function FlashcardsScreen() {
 
 function getStateInsets(safeAreaInsets: EdgeInsets) {
   return {
-    paddingTop: safeAreaInsets.top + Spacing.two,
+    paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
     paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
     paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
     paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
