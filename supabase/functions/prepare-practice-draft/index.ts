@@ -31,6 +31,7 @@ type DiaryEntryRow = {
   polished_text: string;
   bullet_points: unknown;
   transcript_words: unknown;
+  waveform_peaks: unknown;
   content_hash: string;
   created_at: string;
   updated_at: string;
@@ -76,7 +77,7 @@ const draftSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
 const translationCardSelect =
@@ -119,6 +120,7 @@ export default {
     const source = body?.source === 'text' ? 'text' : 'voice';
     const generationMode = parseGenerationMode(body?.generationMode);
     const transcriptWords = source === 'voice' ? normalizeTranscriptWords(body?.transcriptWords) : [];
+    const waveformPeaks = source === 'voice' ? normalizeWaveformPeaks(body?.waveformPeaks) : [];
 
     let output: PreparePracticeDraftOutput;
 
@@ -169,6 +171,7 @@ export default {
         polished_text: polishedText,
         bullet_points: bulletPoints,
         transcript_words: transcriptWords,
+        waveform_peaks: waveformPeaks,
         content_hash: contentHash,
       })
       .select(diaryEntrySelect)
@@ -323,6 +326,22 @@ function normalizeTranscriptWords(value: unknown): TranscriptWord[] {
   }).filter((word) => word.word.length > 0);
 }
 
+function normalizeWaveformPeaks(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .flatMap((peak) => {
+      if (typeof peak !== 'number' || !Number.isFinite(peak)) {
+        return [];
+      }
+
+      return [Math.round(Math.max(0, Math.min(1, peak)) * 1000) / 1000];
+    })
+    .slice(0, 96);
+}
+
 function createCardTimestampFields(card: DraftCard, transcriptWords: TranscriptWord[]) {
   const startIndex = card.sourceWordStartIndex;
   const endIndex = card.sourceWordEndIndex;
@@ -453,6 +472,7 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     polished_text: diaryEntry.polished_text,
     bullet_points: diaryEntry.bullet_points,
     transcript_words: diaryEntry.transcript_words,
+    waveform_peaks: diaryEntry.waveform_peaks,
     created_at: diaryEntry.created_at,
   };
 }

@@ -35,6 +35,8 @@ create table public.diary_entries (
     check (jsonb_typeof(bullet_points) = 'array' and jsonb_array_length(bullet_points) >= 1),
   transcript_words jsonb not null default '[]'::jsonb
     check (jsonb_typeof(transcript_words) = 'array'),
+  waveform_peaks jsonb not null default '[]'::jsonb
+    check (jsonb_typeof(waveform_peaks) = 'array'),
   content_hash text not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()

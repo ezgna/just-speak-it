@@ -1,5 +1,6 @@
 import { ensureAnonymousSession } from '@/lib/backend/auth';
 import type { TranscriptionWord } from '@/lib/backend/transcription';
+import { normalizeWaveformPeaks } from '@/lib/audio/waveform';
 import { type GenerationMode } from '@/lib/generation-mode';
 import { requireSupabaseClient } from '@/lib/supabase/client';
 
@@ -39,6 +40,7 @@ export type PracticeDiaryEntry = {
   polishedText: string;
   bulletPoints: string[];
   transcriptWords: TranscriptionWord[];
+  waveformPeaks: number[];
   createdAt: string;
 };
 
@@ -93,6 +95,7 @@ export type DiaryEntry = {
   plainText: string;
   polishedText: string;
   bulletPoints: string[];
+  waveformPeaks: number[];
   createdAt: string;
 };
 
@@ -104,6 +107,7 @@ type DiaryEntryRow = {
   polished_text: string;
   bullet_points: unknown;
   transcript_words?: unknown;
+  waveform_peaks?: unknown;
   created_at: string;
 };
 
@@ -130,6 +134,7 @@ export type PreparePracticeDraftParams = {
   rawTranscriptText?: string;
   cleanedText?: string;
   transcriptWords?: TranscriptionWord[];
+  waveformPeaks?: number[];
 };
 
 type PracticeFunctionDiaryEntry = {
@@ -140,6 +145,7 @@ type PracticeFunctionDiaryEntry = {
   polished_text: string;
   bullet_points?: unknown;
   transcript_words?: unknown;
+  waveform_peaks?: unknown;
   created_at: string;
 };
 
@@ -178,6 +184,7 @@ export async function preparePracticeDraft({
   rawTranscriptText,
   cleanedText,
   transcriptWords,
+  waveformPeaks,
 }: PreparePracticeDraftParams) {
   await ensureAnonymousSession();
 
@@ -192,6 +199,7 @@ export async function preparePracticeDraft({
         rawTranscriptText,
         cleanedText,
         transcriptWords: source === 'voice' ? transcriptWords ?? [] : [],
+        waveformPeaks: source === 'voice' ? normalizeWaveformPeaks(waveformPeaks) : [],
       },
     }
   );
@@ -258,7 +266,7 @@ export async function getLatestPracticeDraft() {
 
   const { data: diaryEntry, error: diaryError } = await supabase
     .from('diary_entries')
-    .select('id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, created_at')
+    .select('id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, waveform_peaks, created_at')
     .eq('id', generation.diary_entry_id)
     .maybeSingle();
 
@@ -388,7 +396,7 @@ export async function listDiaryEntries() {
 
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
-    .select('id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, created_at')
+    .select('id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, waveform_peaks, created_at')
     .in('id', diaryEntryIds);
 
   if (entriesError) {
@@ -407,6 +415,7 @@ export async function listDiaryEntries() {
       plainText: normalizeDiaryBodyText(entry.plain_text),
       polishedText: normalizeDiaryBodyText(entry.polished_text),
       bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
+      waveformPeaks: normalizeWaveformPeaks(entry.waveform_peaks),
       createdAt: entry.created_at,
     }));
 }
@@ -599,6 +608,7 @@ function mapPracticeFunctionDiaryEntry(entry: PracticeFunctionDiaryEntry): Pract
     polishedText: normalizeDiaryBodyText(entry.polished_text),
     bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
     transcriptWords: normalizeTranscriptWords(entry.transcript_words),
+    waveformPeaks: normalizeWaveformPeaks(entry.waveform_peaks),
     createdAt: entry.created_at,
   };
 }
@@ -612,6 +622,7 @@ function mapPracticeDiaryEntry(entry: DiaryEntryRow): PracticeDiaryEntry {
     polishedText: normalizeDiaryBodyText(entry.polished_text),
     bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.polished_text),
     transcriptWords: normalizeTranscriptWords(entry.transcript_words),
+    waveformPeaks: normalizeWaveformPeaks(entry.waveform_peaks),
     createdAt: entry.created_at,
   };
 }

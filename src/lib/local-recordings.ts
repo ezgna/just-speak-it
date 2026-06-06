@@ -1,5 +1,6 @@
 import { Directory, File, Paths } from 'expo-file-system';
 
+import { normalizeWaveformPeaks } from '@/lib/audio/waveform';
 import { getLocalString, removeLocalValue, setLocalString } from '@/lib/local-storage';
 
 export type LocalRecordingStatus = 'pending' | 'failed' | 'linked';
@@ -12,6 +13,7 @@ export type LocalRecording = {
   durationMillis: number;
   sizeBytes: number;
   mimeType: string;
+  waveformPeaks: number[];
   status: LocalRecordingStatus;
   retention: LocalRecordingRetention;
   createdAt: string;
@@ -119,10 +121,12 @@ export async function saveLocalRecordingFromUri({
   durationMillis,
   recordingUri,
   retention,
+  waveformPeaks,
 }: {
   durationMillis: number;
   recordingUri: string;
   retention: LocalRecordingRetention;
+  waveformPeaks?: number[];
 }) {
   if (!isLocalRecordingSupported()) {
     return null;
@@ -153,6 +157,7 @@ export async function saveLocalRecordingFromUri({
     durationMillis: Math.max(0, Math.round(durationMillis)),
     sizeBytes: Math.max(0, destinationFile.size || sourceFile.size || 0),
     mimeType: getMimeTypeForExtension(extension),
+    waveformPeaks: normalizeWaveformPeaks(waveformPeaks),
     status: 'pending',
     retention,
     createdAt: now,
@@ -334,6 +339,7 @@ function normalizeLocalRecording(id: string, value: unknown): LocalRecording | n
     durationMillis: typeof value.durationMillis === 'number' ? value.durationMillis : 0,
     sizeBytes: typeof value.sizeBytes === 'number' ? value.sizeBytes : 0,
     mimeType: typeof value.mimeType === 'string' ? value.mimeType : LocalRecordingDefaultMimeType,
+    waveformPeaks: normalizeWaveformPeaks(value.waveformPeaks),
     status,
     retention,
     createdAt: value.createdAt,

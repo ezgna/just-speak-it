@@ -27,6 +27,7 @@ export type Database = {
           transcript_words: Json
           updated_at: string
           user_id: string
+          waveform_peaks: Json
         }
         Insert: {
           bullet_points: Json
@@ -40,6 +41,7 @@ export type Database = {
           transcript_words?: Json
           updated_at?: string
           user_id: string
+          waveform_peaks?: Json
         }
         Update: {
           bullet_points?: Json
@@ -53,6 +55,7 @@ export type Database = {
           transcript_words?: Json
           updated_at?: string
           user_id?: string
+          waveform_peaks?: Json
         }
         Relationships: []
       }

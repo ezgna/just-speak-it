@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { pauseAudioPlayerSafely, seekAudioPlayerSafely } from '@/lib/audio/player';
 import {
   getLocalRecordingUriForDiaryEntry,
   isLocalRecordingSupported,
@@ -69,7 +70,7 @@ export function LocalRecordingPlayButton({
   useEffect(() => {
     let frameId: number | null = null;
 
-    player.pause();
+    pauseAudioPlayerSafely(player);
     frameId = requestAnimationFrame(() => {
       setIsClipActive(false);
     });
@@ -83,7 +84,7 @@ export function LocalRecordingPlayButton({
 
   useEffect(() => {
     return () => {
-      player.pause();
+      pauseAudioPlayerSafely(player);
     };
   }, [player]);
 
@@ -103,10 +104,10 @@ export function LocalRecordingPlayButton({
       return;
     }
 
-    player.pause();
+    pauseAudioPlayerSafely(player);
     const frameId = requestAnimationFrame(() => {
       setIsClipActive(false);
-      void player.seekTo(clipStartSec).catch(() => undefined);
+      void seekAudioPlayerSafely(player, clipStartSec);
     });
 
     return () => {
@@ -133,7 +134,7 @@ export function LocalRecordingPlayButton({
     }
 
     if (isPlaying) {
-      player.pause();
+      pauseAudioPlayerSafely(player);
       setIsClipActive(false);
       return;
     }

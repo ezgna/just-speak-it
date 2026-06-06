@@ -7,7 +7,7 @@ import {
 } from 'expo-audio';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, Keyboard, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
+import { Alert, Keyboard, ScrollView, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/just-speak-it-ui';
@@ -17,6 +17,11 @@ import { GlideButton } from '@/components/ui/glide-button';
 import { GlideTextInput } from '@/components/ui/glide-text-input';
 import { MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useGenerationMode } from '@/hooks/use-generation-mode';
+import {
+  appendMeteringSample,
+  createWaveformPeaksFromMetering,
+  normalizeWaveformPeaks,
+} from '@/lib/audio/waveform';
 import {
   completePracticeDraft,
   discardPracticeDraft,
@@ -48,12 +53,17 @@ type EntryMode = 'voice' | 'write';
 
 const DraftInputMaxHeight = 444;
 const DraftInputFrameMaxHeight = 500;
+const RecordingStatusIntervalMs = 100;
+const DailyRecordingOptions = {
+  ...RecordingPresets.HIGH_QUALITY,
+  isMeteringEnabled: true,
+} as const;
 
 export default function HomeScreen() {
   const safeAreaInsets = useSafeAreaInsets();
   const palette = useDailyPalette();
-  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
-  const recorderState = useAudioRecorderState(audioRecorder);
+  const audioRecorder = useAudioRecorder(DailyRecordingOptions);
+  const recorderState = useAudioRecorderState(audioRecorder, RecordingStatusIntervalMs);
   const { generationMode } = useGenerationMode();
   const [entryMode, setEntryMode] = useState<EntryMode>('voice');
   const [diaryDraftText, setDiaryDraftText] = useState('');
@@ -68,6 +78,7 @@ export default function HomeScreen() {
   const [isCompletingPractice, setIsCompletingPractice] = useState(false);
   const [rawTranscriptText, setRawTranscriptText] = useState<string | null>(null);
   const [transcriptWords, setTranscriptWords] = useState<TranscriptionWord[]>([]);
+  const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
   const [retryRecordingId, setRetryRecordingId] = useState<string | null>(null);
   const [pendingLocalRecordingId, setPendingLocalRecordingId] = useState<string | null>(null);
@@ -78,6 +89,7 @@ export default function HomeScreen() {
   const generationInFlightRef = useRef(false);
   const resetDraftOnBlurRef = useRef(false);
   const draftInteractionVersionRef = useRef(0);
+  const waveformMeteringSamplesRef = useRef<number[]>([]);
   const currentDraft = activeDraft?.generationMode === generationMode ? activeDraft : null;
 
   const isRecordingButtonActive = recorderState.isRecording || isStoppingRecording;
@@ -102,6 +114,12 @@ export default function HomeScreen() {
   const hasDraftText = diaryDraftText.trim().length > 0;
   const hasActiveDraft = Boolean(currentDraft && draftCards.length > 0);
   const hasCompletedPracticeCards = completedPracticeCards.length > 0;
+  const shouldShowTranscribedPreview =
+    isPreparingDraft &&
+    diaryDraftSource === 'voice' &&
+    hasDraftText &&
+    !hasActiveDraft &&
+    !hasCompletedPracticeCards;
   const isEntryIdle = !hasActiveDraft && !hasCompletedPracticeCards;
   const isWriteMode = entryMode === 'write';
   const shouldShowSplitAction =
@@ -151,6 +169,7 @@ export default function HomeScreen() {
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
     setTranscriptWords([]);
+    setWaveformPeaks([]);
     setTranscriptionError(null);
     setGenerationError(null);
     setActiveDraft(null);
@@ -166,6 +185,7 @@ export default function HomeScreen() {
     setDiaryDraftSource(draft.source);
     setRawTranscriptText(draft.source === 'voice' ? draft.diaryEntry.originalText : null);
     setTranscriptWords(draft.source === 'voice' ? draft.diaryEntry.transcriptWords : []);
+    setWaveformPeaks(draft.source === 'voice' ? draft.diaryEntry.waveformPeaks : []);
     setTranscriptionError(null);
     setGenerationError(null);
   }, []);
@@ -236,6 +256,17 @@ export default function HomeScreen() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!recorderState.isRecording || typeof recorderState.metering !== 'number') {
+      return;
+    }
+
+    waveformMeteringSamplesRef.current = appendMeteringSample(
+      waveformMeteringSamplesRef.current,
+      recorderState.metering
+    );
+  }, [recorderState.durationMillis, recorderState.isRecording, recorderState.metering]);
+
   async function startRecording() {
     markDraftInteraction();
     clearRetryRecordingAction();
@@ -245,6 +276,8 @@ export default function HomeScreen() {
     setRecordingIntentActive(true);
     setIsStoppingRecording(false);
     setRecordingStopDurationMillis(0);
+    waveformMeteringSamplesRef.current = [];
+    setWaveformPeaks([]);
     setTranscriptionError(null);
     setGenerationError(null);
 
@@ -260,13 +293,14 @@ export default function HomeScreen() {
         allowsRecording: true,
         playsInSilentMode: true,
       });
-      await audioRecorder.prepareToRecordAsync();
+      await audioRecorder.prepareToRecordAsync(DailyRecordingOptions);
       await setRecordingHapticsAllowed(true);
       audioRecorder.record();
       setDiaryDraftText('');
       setDiaryDraftSource('voice');
       setRawTranscriptText(null);
       setTranscriptWords([]);
+      setWaveformPeaks([]);
       setActiveDraft(null);
       setDraftCards([]);
       setCompletedPracticeCards([]);
@@ -284,6 +318,7 @@ export default function HomeScreen() {
 
   async function stopRecording() {
     const stoppedDurationMillis = recorderState.durationMillis;
+    const nextWaveformPeaks = createWaveformPeaksFromMetering(waveformMeteringSamplesRef.current);
     setRecordingIntentActive(false);
     setIsRecordingBusy(true);
     setIsStoppingRecording(true);
@@ -323,20 +358,23 @@ export default function HomeScreen() {
       const localRecording = await saveRecordingForTranscription({
         durationMillis: stoppedDurationMillis,
         recordingUri,
+        waveformPeaks: nextWaveformPeaks,
       });
       const transcriptionUri =
         localRecording ? getLocalRecordingUri(localRecording.id) ?? recordingUri : recordingUri;
 
-      await handleTranscription(transcriptionUri, localRecording?.id ?? null);
+      await handleTranscription(transcriptionUri, localRecording?.id ?? null, nextWaveformPeaks);
     }
   }
 
   async function saveRecordingForTranscription({
     durationMillis,
     recordingUri,
+    waveformPeaks,
   }: {
     durationMillis: number;
     recordingUri: string;
+    waveformPeaks: number[];
   }): Promise<LocalRecording | null> {
     if (!isLocalRecordingSupported()) {
       return null;
@@ -347,6 +385,7 @@ export default function HomeScreen() {
         durationMillis,
         recordingUri,
         retention: isLocalRecordingSaveEnabled() ? 'persistent' : 'retry',
+        waveformPeaks,
       });
     } catch (error) {
       setGenerationError(
@@ -356,8 +395,13 @@ export default function HomeScreen() {
     }
   }
 
-  async function handleTranscription(recordingUri: string, localRecordingId: string | null = null) {
+  async function handleTranscription(
+    recordingUri: string,
+    localRecordingId: string | null = null,
+    nextWaveformPeaks: number[] = []
+  ) {
     setIsTranscribing(true);
+    const normalizedWaveformPeaks = normalizeWaveformPeaks(nextWaveformPeaks);
 
     if (localRecordingId) {
       clearLocalRecordingError(localRecordingId);
@@ -369,6 +413,7 @@ export default function HomeScreen() {
       const cleanedText = transcript.cleanedText.trim();
       setRawTranscriptText(cleanedText ? transcript.rawText : null);
       setTranscriptWords(cleanedText ? transcript.words : []);
+      setWaveformPeaks(cleanedText ? normalizedWaveformPeaks : []);
       setDiaryDraftText(cleanedText);
       setDiaryDraftSource(cleanedText ? 'voice' : 'text');
       setActiveDraft(null);
@@ -386,6 +431,7 @@ export default function HomeScreen() {
           source: 'voice',
           rawTranscriptText: transcript.rawText,
           transcriptWords: transcript.words,
+          waveformPeaks: normalizedWaveformPeaks,
           localRecordingId,
         });
       }
@@ -410,12 +456,14 @@ export default function HomeScreen() {
     source,
     rawTranscriptText: nextRawTranscriptText,
     transcriptWords: nextTranscriptWords,
+    waveformPeaks: nextWaveformPeaks,
     localRecordingId,
   }: {
     diaryText: string;
     source: DiaryDraftSource;
     rawTranscriptText?: string | null;
     transcriptWords?: TranscriptionWord[];
+    waveformPeaks?: number[];
     localRecordingId?: string | null;
   }) {
     markDraftInteraction();
@@ -437,6 +485,8 @@ export default function HomeScreen() {
     setActiveDraft(null);
     setDraftCards([]);
     setCompletedPracticeCards([]);
+    const nextVoiceWaveformPeaks =
+      source === 'voice' ? normalizeWaveformPeaks(nextWaveformPeaks ?? waveformPeaks) : [];
 
     try {
       const draft = await preparePracticeDraft({
@@ -446,6 +496,7 @@ export default function HomeScreen() {
         rawTranscriptText:
           source === 'voice' ? nextRawTranscriptText ?? normalizedDiaryText : normalizedDiaryText,
         transcriptWords: source === 'voice' ? nextTranscriptWords ?? transcriptWords : [],
+        waveformPeaks: nextVoiceWaveformPeaks,
         generationMode,
       });
       applyPracticeDraft(draft);
@@ -504,6 +555,7 @@ export default function HomeScreen() {
       setDiaryDraftText(practice.diaryEntry.plainText);
       setDiaryDraftSource(practice.source);
       setTranscriptWords(practice.source === 'voice' ? practice.diaryEntry.transcriptWords : []);
+      setWaveformPeaks(practice.source === 'voice' ? practice.diaryEntry.waveformPeaks : []);
       notifyPracticeChanged();
     } catch (error) {
       setGenerationError(
@@ -521,6 +573,7 @@ export default function HomeScreen() {
     }
 
     const retryRecordingUri = getLocalRecordingUri(retryRecordingId);
+    const retryRecording = getLocalRecording(retryRecordingId);
 
     if (!retryRecordingUri) {
       setTranscriptionError('保存済み録音を読み込めませんでした。もう一度録音してください。');
@@ -529,7 +582,7 @@ export default function HomeScreen() {
       return;
     }
 
-    await handleTranscription(retryRecordingUri, retryRecordingId);
+    await handleTranscription(retryRecordingUri, retryRecordingId, retryRecording?.waveformPeaks ?? []);
   }
 
   async function handlePrimaryActionPress() {
@@ -558,6 +611,7 @@ export default function HomeScreen() {
         source: diaryDraftSource,
         rawTranscriptText,
         transcriptWords,
+        waveformPeaks,
         localRecordingId: diaryDraftSource === 'voice' ? pendingLocalRecordingId : null,
       });
       return;
@@ -595,6 +649,7 @@ export default function HomeScreen() {
     }
 
     setTranscriptWords([]);
+    setWaveformPeaks([]);
     setDiaryDraftText(nextText);
     setTranscriptionError(null);
     setGenerationError(null);
@@ -612,6 +667,7 @@ export default function HomeScreen() {
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
     setTranscriptWords([]);
+    setWaveformPeaks([]);
     setTranscriptionError(null);
     setGenerationError(null);
     setActiveDraft(null);
@@ -701,6 +757,8 @@ export default function HomeScreen() {
           <GeneratedPracticePreview cards={draftCards} />
         ) : hasCompletedPracticeCards ? (
           <GeneratedPracticePreview cards={completedPracticeCards} />
+        ) : shouldShowTranscribedPreview ? (
+          <TranscribedDiaryPreview text={diaryDraftText} />
         ) : isWriteMode ? (
           <View style={styles.inputDismissArea}>
             <GlideTextInput
@@ -835,6 +893,26 @@ export default function HomeScreen() {
   );
 }
 
+function TranscribedDiaryPreview({ text }: { text: string }) {
+  return (
+    <View style={styles.transcribedPreview}>
+      <View style={styles.transcribedStatusRow}>
+        <View style={styles.transcribedStatusDot} />
+        <ThemedText style={styles.transcribedStatusText}>Splitting</ThemedText>
+      </View>
+      <ScrollView
+        accessibilityLabel="文字起こし済みの日記本文"
+        showsVerticalScrollIndicator={false}
+        style={styles.transcribedScrollView}
+        contentContainerStyle={styles.transcribedBodyContainer}>
+        <ThemedText style={styles.transcribedBody} selectable>
+          {text}
+        </ThemedText>
+      </ScrollView>
+    </View>
+  );
+}
+
 function formatDuration(durationMillis: number) {
   const totalSeconds = Math.max(0, Math.floor(durationMillis / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -884,6 +962,40 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     width: '100%',
+  },
+  transcribedPreview: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    gap: Spacing.three,
+  },
+  transcribedStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+  },
+  transcribedStatusDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 999,
+    backgroundColor: '#088A81',
+  },
+  transcribedStatusText: {
+    color: '#5F6670',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: 900,
+  },
+  transcribedScrollView: {
+    flexShrink: 1,
+  },
+  transcribedBodyContainer: {
+    paddingBottom: Spacing.one,
+  },
+  transcribedBody: {
+    fontSize: 22,
+    lineHeight: 34,
+    fontWeight: 800,
   },
   modeActionLayer: {
     position: 'absolute',
