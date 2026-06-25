@@ -30,7 +30,6 @@ create table public.diary_entries (
   source text not null default 'voice' check (source in ('text', 'voice')),
   original_text text not null,
   plain_text text not null,
-  polished_text text not null,
   bullet_points jsonb not null
     check (jsonb_typeof(bullet_points) = 'array' and jsonb_array_length(bullet_points) >= 1),
   transcript_words jsonb not null default '[]'::jsonb

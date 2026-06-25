@@ -10,7 +10,6 @@ type DraftCard = {
 };
 
 type PreparePracticeDraftOutput = {
-  polishedText: string;
   bulletPoints: string[];
   cards: DraftCard[];
 };
@@ -28,7 +27,6 @@ type DiaryEntryRow = {
   source: 'text' | 'voice';
   original_text: string;
   plain_text: string;
-  polished_text: string;
   bullet_points: unknown;
   transcript_words: unknown;
   waveform_peaks: unknown;
@@ -51,9 +49,8 @@ type PracticeGenerationRow = {
 const draftSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['polishedText', 'bulletPoints', 'cards'],
+  required: ['bulletPoints', 'cards'],
   properties: {
-    polishedText: { type: 'string' },
     bulletPoints: {
       type: 'array',
       minItems: 1,
@@ -77,7 +74,7 @@ const draftSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, original_text, plain_text, polished_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
 const translationCardSelect =
@@ -139,8 +136,7 @@ export default {
       );
     }
 
-    const polishedText = normalizeDiaryText(output.polishedText, plainText);
-    const bulletPoints = normalizeBulletPoints(output.bulletPoints, polishedText);
+    const bulletPoints = normalizeBulletPoints(output.bulletPoints, plainText);
     const cardDrafts = output.cards
       .map((card, index) => ({
         sort_order: index + 1,
@@ -168,7 +164,6 @@ export default {
         source,
         original_text: originalText,
         plain_text: plainText,
-        polished_text: polishedText,
         bullet_points: bulletPoints,
         transcript_words: transcriptWords,
         waveform_peaks: waveformPeaks,
@@ -390,10 +385,7 @@ function createDraftInstructions(generationMode: GenerationMode, hasTranscriptWo
     'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
     '入力は JSON です。plainText は日本語の文字起こし、またはユーザーが書いた日本語の日記本文です。',
     'transcriptWords は音声文字起こしの word timestamp 配列です。各要素は index, word, start, end を持ちます。',
-    'あなたの仕事は、日記として読み返せる polishedText と、後で英語カード化するための日本語カード案を作ることです。',
-    'polishedText は日記タブの「読みやすく」表示にそのまま出す日本語本文です。',
-    'polishedText にタイトル、見出し、箇条書き、要約、説明文を入れないでください。',
-    'polishedText は入力をそのまま長く整えるのではなく、適度に簡潔な日記文にしてください。',
+    'あなたの仕事は、後で読み返せる日本語の要旨メモと、英語カード化するための日本語カード案を作ることです。',
     'bulletPoints は日記タブの「箇条書き」表示にそのまま出す、日本語の要旨メモ配列です。',
     'bulletPoints はカード分割ではありません。原文の文ごとに1項目へ分けないでください。',
     'bulletPoints の個数は、独立した要点の数だけにしてください。近い内容、言い直し、同じ話題の補足は1つに統合してください。',
@@ -441,16 +433,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function normalizeDiaryText(value: string, fallbackText: string) {
-  const normalizedText = value.replace(/\n{3,}/g, '\n\n').trim();
-
-  if (normalizedText) {
-    return normalizedText;
-  }
-
-  return fallbackText.replace(/\n{3,}/g, '\n\n').trim();
-}
-
 function normalizeBulletPoints(value: string[], fallbackText: string) {
   const bulletPoints = value
     .map((point) => point.replace(/^[\s・\-*、。]+/g, '').trim())
@@ -469,7 +451,6 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     source: diaryEntry.source,
     original_text: diaryEntry.original_text,
     plain_text: diaryEntry.plain_text,
-    polished_text: diaryEntry.polished_text,
     bullet_points: diaryEntry.bullet_points,
     transcript_words: diaryEntry.transcript_words,
     waveform_peaks: diaryEntry.waveform_peaks,

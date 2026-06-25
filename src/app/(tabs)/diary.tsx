@@ -11,6 +11,7 @@ import {
   type GestureResponderEvent,
   type LayoutChangeEvent,
   type StyleProp,
+  type TextStyle,
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -31,12 +32,11 @@ import { getLocalString, setLocalString } from '@/lib/local-storage';
 import { subscribeToPracticeRefresh } from '@/lib/practice-refresh';
 
 type LoadMode = 'initial' | 'refresh' | 'sync';
-type DiaryDisplayMode = 'original' | 'plain' | 'polished' | 'bullets';
+type DiaryDisplayMode = 'original' | 'plain' | 'bullets';
 
 const DiaryDisplayModeOptions: { label: string; value: DiaryDisplayMode }[] = [
   { label: '原文', value: 'original' },
   { label: 'そのまま', value: 'plain' },
-  { label: '読みやすく', value: 'polished' },
   { label: '箇条書き', value: 'bullets' },
 ];
 
@@ -47,7 +47,6 @@ function isDiaryDisplayMode(value: string | null): value is DiaryDisplayMode {
   return (
     value === 'original' ||
     value === 'plain' ||
-    value === 'polished' ||
     value === 'bullets'
   );
 }
@@ -323,29 +322,12 @@ function DiaryPaper({
     );
   }
 
-  if (displayMode === 'polished') {
-    return (
-      <View style={styles.diaryOriginalEntry}>
-        <View style={styles.diaryOriginalRail} />
-        <View style={styles.diaryOriginalContent}>
-          <ThemedText style={[styles.diaryPaperDate, styles.diaryOriginalDate]} selectable>
-            {formatDate(entry.createdAt)}
-          </ThemedText>
-          <ThemedText
-            style={[
-              styles.diaryPaperBody,
-              styles.diaryPaperBodyPolished,
-              styles.diaryPaperBodyPolishedOnMint,
-            ]}
-            selectable>
-            {getDiaryDisplayText(entry, displayMode)}
-          </ThemedText>
-        </View>
-      </View>
-    );
-  }
-
   if (displayMode === 'original' || displayMode === 'plain') {
+    const bodyStyles: StyleProp<TextStyle> =
+      displayMode === 'plain'
+        ? [styles.diaryPaperBody, styles.diaryPaperBodyReadable, styles.diaryPaperBodyReadableOnMint]
+        : [styles.diaryPaperBody, styles.diaryPaperBodyRaw];
+
     return (
       <View style={styles.diaryOriginalEntry}>
         <View style={styles.diaryOriginalRail} />
@@ -361,11 +343,7 @@ function DiaryPaper({
             />
           )}
           <ThemedText
-            style={[
-              styles.diaryPaperBody,
-              styles.diaryPaperBodyRaw,
-              displayMode === 'plain' && styles.diaryPaperBodyPlainOnMint,
-            ]}
+            style={bodyStyles}
             selectable>
             {getDiaryDisplayText(entry, displayMode)}
           </ThemedText>
@@ -374,21 +352,7 @@ function DiaryPaper({
     );
   }
 
-  return (
-    <DiaryPaperSurface>
-      <ThemedText style={styles.diaryPaperDate} selectable>
-        {formatDate(entry.createdAt)}
-      </ThemedText>
-      <ThemedText
-        style={[
-          styles.diaryPaperBody,
-          displayMode === 'polished' && styles.diaryPaperBodyPolished,
-        ]}
-        selectable>
-        {getDiaryDisplayText(entry, displayMode)}
-      </ThemedText>
-    </DiaryPaperSurface>
-  );
+  return null;
 }
 
 function DiaryWaveform({
@@ -713,14 +677,10 @@ function getDiaryDisplayText(entry: DiaryEntry, displayMode: Exclude<DiaryDispla
     return normalizeDisplayText(entry.originalText);
   }
 
-  if (displayMode === 'polished') {
-    return formatPolishedDisplayText(entry.polishedText);
-  }
-
-  return normalizeDisplayText(entry.plainText);
+  return formatReadableDisplayText(entry.plainText);
 }
 
-function formatPolishedDisplayText(value: string) {
+function formatReadableDisplayText(value: string) {
   return normalizeDisplayText(value)
     .replace(/\s*\n+\s*/g, ' ')
     .replace(/([。！？!?]+[」』）)]*)\s*/g, '$1\n')
@@ -919,16 +879,12 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     fontWeight: 800,
   },
-  diaryPaperBodyPlainOnMint: {
-    fontSize: 17,
-    lineHeight: 29,
-  },
-  diaryPaperBodyPolished: {
+  diaryPaperBodyReadable: {
     fontSize: 19,
     lineHeight: 33,
     fontWeight: 900,
   },
-  diaryPaperBodyPolishedOnMint: {
+  diaryPaperBodyReadableOnMint: {
     color: DiaryColors.voiceText,
     fontSize: 18,
     lineHeight: 31,
