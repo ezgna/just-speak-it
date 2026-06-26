@@ -552,9 +552,7 @@ function DiaryWaveform({
   );
   const playIconColor = !isPlayable
     ? '#7A8790'
-    : isPlaying
-      ? '#FFFFFF'
-      : DiaryColors.voiceAccentDark;
+    : DiaryColors.voiceAccentDark;
   const playerContent = (
     <>
       <Pressable
@@ -566,7 +564,6 @@ function DiaryWaveform({
         onPress={handlePlayButtonPress}
         style={[
           styles.diaryWaveformPlayButton,
-          isPlaying && styles.diaryWaveformPlayButtonActive,
           !isPlayable && styles.diaryWaveformPlayButtonDisabled,
         ]}>
         <SymbolView
@@ -581,7 +578,6 @@ function DiaryWaveform({
             <ThemedText
               style={[
                 styles.diaryWaveformPlayIcon,
-                isPlaying && styles.diaryWaveformPlayIconActive,
                 !isPlayable && styles.diaryWaveformPlayIconDisabled,
               ]}>
               {isPlaying ? 'Ⅱ' : '▶'}
@@ -819,9 +815,6 @@ const styles = StyleSheet.create({
     borderColor: DiaryColors.voiceAccent,
     backgroundColor: DiaryColors.voiceWarm,
   },
-  diaryWaveformPlayButtonActive: {
-    backgroundColor: DiaryColors.voiceAccent,
-  },
   diaryWaveformPlayButtonDisabled: {
     backgroundColor: DiaryColors.voiceDisabled,
     borderColor: DiaryColors.voiceAccentMuted,
@@ -831,9 +824,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 20,
     fontWeight: 900,
-  },
-  diaryWaveformPlayIconActive: {
-    color: '#FFFFFF',
   },
   diaryWaveformPlayIconDisabled: {
     color: '#7A8790',

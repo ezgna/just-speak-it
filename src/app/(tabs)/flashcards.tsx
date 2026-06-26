@@ -4,6 +4,7 @@ import {
   type EdgeInsets,
 } from 'react-native-safe-area-context';
 
+import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { SlackFlashcardLab } from '@/components/slack-flashcard-lab';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
@@ -11,14 +12,15 @@ import { useTranslationCardGroups } from '@/hooks/use-translation-card-groups';
 
 export default function FlashcardsScreen() {
   const safeAreaInsets = useSafeAreaInsets();
+  const palette = useDailyPalette();
   const { groups, isInitialLoading, isRefreshing, errorMessage, refreshGroups } =
     useTranslationCardGroups();
 
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: palette.background }]}>
       {isInitialLoading && groups.length === 0 ? (
         <View style={[styles.centerState, getStateInsets(safeAreaInsets)]}>
-          <ActivityIndicator color={ReviewColors.white} />
+          <ActivityIndicator color={palette.primary} />
         </View>
       ) : errorMessage && groups.length === 0 ? (
         <View style={[styles.centerState, getStateInsets(safeAreaInsets)]}>
@@ -71,14 +73,17 @@ function getStateInsets(safeAreaInsets: EdgeInsets) {
 }
 
 const ReviewColors = {
-  white: '#FFFFFF',
+  bodyText: '#111111',
+  mint: '#2FDD6C',
+  mutedText: '#5F6670',
+  shadow: '0 12px 0 #D9E7E1',
+  surface: '#FFFFFF',
 };
 
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
     alignItems: 'center',
-    backgroundColor: '#4B154E',
   },
   centerState: {
     flex: 1,
@@ -89,20 +94,23 @@ const styles = StyleSheet.create({
   },
   statePanel: {
     width: '100%',
-    borderRadius: 28,
+    borderRadius: 20,
     borderCurve: 'continuous',
-    backgroundColor: 'rgba(255, 255, 255, 0.96)',
+    borderWidth: 4,
+    borderColor: ReviewColors.bodyText,
+    backgroundColor: ReviewColors.surface,
     padding: Spacing.four,
     gap: Spacing.three,
+    boxShadow: ReviewColors.shadow,
   },
   stateTitle: {
-    color: '#1D1C1D',
+    color: ReviewColors.bodyText,
     fontSize: 24,
     lineHeight: 31,
     fontWeight: 800,
   },
   stateText: {
-    color: '#5F6670',
+    color: ReviewColors.mutedText,
     fontSize: 16,
     lineHeight: 24,
     fontWeight: 600,
@@ -113,7 +121,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 16,
     borderCurve: 'continuous',
-    backgroundColor: '#2E8B62',
+    borderWidth: 3,
+    borderColor: ReviewColors.bodyText,
+    backgroundColor: ReviewColors.mint,
     paddingHorizontal: Spacing.three,
   },
   retryButtonText: {

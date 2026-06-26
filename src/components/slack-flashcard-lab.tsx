@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Pressable,
   StyleSheet,
@@ -17,12 +17,15 @@ import Animated, {
   interpolateColor,
   runOnJS,
   type SharedValue,
+  useAnimatedProps,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, { Circle } from 'react-native-svg';
 
+import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { LocalRecordingPlayButton } from '@/components/local-recording-play-button';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
@@ -79,9 +82,17 @@ const AnswerTextMetrics = {
   fontSize: 28,
   lineHeight: 38,
 };
+const DecisionRingSize = 68;
+const DecisionRingStrokeWidth = 4;
+const DecisionRingStartOffset = 32;
+const DecisionRingCenter = DecisionRingSize / 2;
+const DecisionRingRadius = (DecisionRingSize - DecisionRingStrokeWidth) / 2;
+const DecisionRingCircumference = 2 * Math.PI * DecisionRingRadius;
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabProps) {
   const { width, height } = useWindowDimensions();
+  const palette = useDailyPalette();
   const { cardStatuses, restoreCardProgress, setCardStatus } = useCardLearningStatuses();
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
@@ -512,7 +523,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
 
   if (!activeCard) {
     return (
-      <Animated.View style={[styles.root, rootInsets]}>
+      <Animated.View style={[styles.root, rootInsets, { backgroundColor: palette.background }]}>
         <View style={styles.content}>
           <LabHeader
             dueCount={0}
@@ -529,7 +540,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
                     web: 'check_circle',
                   }}
                   size={42}
-                  tintColor={LabColors.green}
+                  tintColor={LabColors.mint}
                 />
               </View>
               <ThemedText style={styles.doneTitle} selectable>
@@ -546,7 +557,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   }
 
   return (
-    <Animated.View style={[styles.root, rootInsets]}>
+    <Animated.View style={[styles.root, rootInsets, { backgroundColor: palette.background }]}>
       <View style={styles.content}>
         <LabHeader
           dueCount={displayQueue.length}
@@ -731,7 +742,6 @@ const SlackCardLayer = memo(function SlackCardLayer({
           height: cardHeight,
           zIndex: getCardLayerZIndex(position),
         },
-        position === 0 ? styles.frontCardLayer : styles.previewCardLayer,
         layerStyle,
       ]}>
       <View style={styles.cardClip}>
@@ -781,7 +791,7 @@ function LabHeader({
             web: 'undo',
           }}
           size={22}
-          tintColor={LabColors.white}
+          tintColor={LabColors.bodyText}
           fallback={
             <ThemedText style={styles.headerFallbackIcon}>
               ←
@@ -894,7 +904,7 @@ const SlackCardFace = memo(function SlackCardFace({
         </GestureDetector>
 
         {!isPreview && isAnswerVisible ? (
-          <>
+          <View style={styles.answerSoundRow}>
             <LocalRecordingPlayButton
               diaryEntryId={card.diaryEntryId}
               audioStartSec={card.audioStartSec}
@@ -902,11 +912,10 @@ const SlackCardFace = memo(function SlackCardFace({
               size={40}
               iconSize={18}
               backgroundColor={LabColors.cardTint}
-              activeBackgroundColor={LabColors.green}
-              borderColor="rgba(29, 28, 29, 0.14)"
+              activeBackgroundColor={LabColors.mint}
+              borderColor={LabColors.bodyText}
               tintColor={LabColors.text}
-              activeTintColor={LabColors.white}
-              style={[styles.soundButtonFloating, styles.sourceSoundButtonFloating]}
+              activeTintColor={LabColors.bodyText}
               onPlayStart={handleLocalRecordingPlayStart}
             />
             <Pressable
@@ -916,9 +925,8 @@ const SlackCardFace = memo(function SlackCardFace({
               onPress={handleSpeakPress}
               style={({ pressed }) => [
                 styles.soundButton,
-                styles.soundButtonFloating,
                 {
-                  backgroundColor: isSpeaking ? LabColors.green : LabColors.cardTint,
+                  backgroundColor: isSpeaking ? LabColors.mint : LabColors.cardTint,
                   opacity: pressed ? 0.72 : 1,
                 },
               ]}>
@@ -929,10 +937,10 @@ const SlackCardFace = memo(function SlackCardFace({
                   web: 'volume_up',
                 }}
                 size={18}
-                tintColor={isSpeaking ? LabColors.white : LabColors.text}
+                tintColor={LabColors.text}
               />
             </Pressable>
-          </>
+          </View>
         ) : null}
       </View>
     </View>
@@ -966,9 +974,9 @@ function DecisionButton({
           web: isRead ? 'check_circle' : 'replay_circle_filled',
         }}
         size={20}
-        tintColor={isRead ? LabColors.white : LabColors.text}
+        tintColor={LabColors.bodyText}
       />
-      <ThemedText style={[styles.decisionButtonText, { color: isRead ? LabColors.white : LabColors.text }]}>
+      <ThemedText style={styles.decisionButtonText}>
         {label}
       </ThemedText>
     </Pressable>
@@ -1038,7 +1046,13 @@ function DecisionOverlay({
     <View pointerEvents="none" style={styles.decisionOverlay}>
       <Animated.View style={[styles.decisionOverlaySurface, overlaySurfaceStyle]} />
       <Animated.View style={[styles.overlayLabel, styles.keepOverlayLabel, keepLabelStyle]}>
-        <View style={styles.overlayIcon}>
+        <DecisionProgressIcon
+          cardId={cardId}
+          direction="keep"
+          progressColor={LabColors.keepOverlay}
+          swipeOwnerCardId={swipeOwnerCardId}
+          swipeThreshold={swipeThreshold}
+          translateX={translateX}>
           <SymbolView
             name={{
               ios: 'arrow.counterclockwise',
@@ -1048,14 +1062,20 @@ function DecisionOverlay({
             size={32}
             tintColor={LabColors.keepOverlay}
           />
-        </View>
+        </DecisionProgressIcon>
         <ThemedText style={styles.overlayText}>
           もう一回
         </ThemedText>
       </Animated.View>
 
       <Animated.View style={[styles.overlayLabel, styles.readOverlayLabel, readLabelStyle]}>
-        <View style={styles.overlayIcon}>
+        <DecisionProgressIcon
+          cardId={cardId}
+          direction="read"
+          progressColor={LabColors.readOverlay}
+          swipeOwnerCardId={swipeOwnerCardId}
+          swipeThreshold={swipeThreshold}
+          translateX={translateX}>
           <SymbolView
             name={{
               ios: 'checkmark',
@@ -1065,11 +1085,76 @@ function DecisionOverlay({
             size={36}
             tintColor={LabColors.readOverlay}
           />
-        </View>
+        </DecisionProgressIcon>
         <ThemedText style={styles.overlayText}>
           言えた
         </ThemedText>
       </Animated.View>
+    </View>
+  );
+}
+
+function DecisionProgressIcon({
+  cardId,
+  children,
+  direction,
+  progressColor,
+  swipeOwnerCardId,
+  swipeThreshold,
+  translateX,
+}: {
+  cardId: string;
+  children: ReactNode;
+  direction: 'keep' | 'read';
+  progressColor: string;
+  swipeOwnerCardId: SharedValue<string | null>;
+  swipeThreshold: number;
+  translateX: SharedValue<number>;
+}) {
+  const directionSign = direction === 'keep' ? -1 : 1;
+  const animatedRingProps = useAnimatedProps(() => {
+    const x = swipeOwnerCardId.get() === cardId ? translateX.get() : 0;
+    const dragDistance = Math.max(0, x * directionSign);
+    const progressRange = Math.max(1, swipeThreshold - DecisionRingStartOffset);
+    const progress = Math.max(
+      0,
+      Math.min(1, (dragDistance - DecisionRingStartOffset) / progressRange)
+    );
+
+    return {
+      strokeDashoffset: DecisionRingCircumference * (1 - progress),
+    };
+  });
+
+  return (
+    <View style={styles.overlayIcon}>
+      <Svg
+        width={DecisionRingSize}
+        height={DecisionRingSize}
+        viewBox={`0 0 ${DecisionRingSize} ${DecisionRingSize}`}
+        style={styles.overlayProgressRing}>
+        <Circle
+          cx={DecisionRingCenter}
+          cy={DecisionRingCenter}
+          r={DecisionRingRadius}
+          fill="none"
+          stroke={LabColors.ringTrack}
+          strokeWidth={DecisionRingStrokeWidth}
+        />
+        <AnimatedCircle
+          cx={DecisionRingCenter}
+          cy={DecisionRingCenter}
+          r={DecisionRingRadius}
+          animatedProps={animatedRingProps}
+          fill="none"
+          stroke={progressColor}
+          strokeDasharray={`${DecisionRingCircumference} ${DecisionRingCircumference}`}
+          strokeLinecap="round"
+          strokeWidth={DecisionRingStrokeWidth}
+          transform={`rotate(-90 ${DecisionRingCenter} ${DecisionRingCenter})`}
+        />
+      </Svg>
+      <View style={styles.overlayIconContent}>{children}</View>
     </View>
   );
 }
@@ -1106,15 +1191,19 @@ function getCardLayerZIndex(position: number) {
 }
 
 const LabColors = {
-  plum: '#4B154E',
   white: '#FFFFFF',
-  text: '#1D1C1D',
-  mutedText: '#616061',
+  bodyText: '#111111',
+  text: '#111111',
+  mutedText: '#5F6670',
   subtleText: '#717274',
-  cardTint: '#F4F4F4',
-  keepOverlay: '#3678BD',
-  green: '#2E8B62',
-  readOverlay: '#2F8B61',
+  cardTint: '#FFF6E7',
+  coral: '#FF7661',
+  keepOverlay: '#FF7661',
+  mint: '#2FDD6C',
+  mintSoft: '#E9F7EE',
+  ringTrack: 'rgba(17, 17, 17, 0.16)',
+  readOverlay: '#2FDD6C',
+  shadow: '0 12px 0 #D9E7E1',
 };
 
 const styles = StyleSheet.create({
@@ -1122,7 +1211,6 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     alignItems: 'center',
-    backgroundColor: LabColors.plum,
   },
   content: {
     flex: 1,
@@ -1144,14 +1232,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
-    backgroundColor: 'rgba(255, 255, 255, 0.11)',
+    borderWidth: 3,
+    borderColor: LabColors.bodyText,
+    backgroundColor: LabColors.white,
   },
   headerIconButtonPlaceholder: {
     width: 48,
     height: 48,
   },
   headerFallbackIcon: {
-    color: LabColors.white,
+    color: LabColors.bodyText,
     fontSize: 22,
     lineHeight: 24,
     fontWeight: 800,
@@ -1161,7 +1251,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   leftCount: {
-    color: LabColors.white,
+    color: LabColors.bodyText,
     fontSize: 24,
     lineHeight: 31,
     fontWeight: 900,
@@ -1185,20 +1275,15 @@ const styles = StyleSheet.create({
   },
   cardLayer: {
     position: 'absolute',
-    borderRadius: 34,
+    borderRadius: 24,
     borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: LabColors.bodyText,
     backgroundColor: LabColors.white,
-  },
-  frontCardLayer: {
-    boxShadow: '0 22px 46px rgba(18, 8, 22, 0.28)',
-  },
-  previewCardLayer: {
-    borderColor: LabColors.white,
-    boxShadow: '0 22px 46px rgba(18, 8, 22, 0.28)',
   },
   cardClip: {
     flex: 1,
-    borderRadius: 32.5,
+    borderRadius: 19.5,
     borderCurve: 'continuous',
     overflow: 'hidden',
     backgroundColor: LabColors.white,
@@ -1236,15 +1321,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 12,
     borderCurve: 'continuous',
+    borderWidth: 2,
+    borderColor: LabColors.bodyText,
   },
-  soundButtonFloating: {
-    position: 'absolute',
-    top: Spacing.three,
-    right: Spacing.three,
-    zIndex: 2,
-  },
-  sourceSoundButtonFloating: {
-    right: Spacing.three + 48,
+  answerSoundRow: {
+    flexDirection: 'row',
+    alignSelf: 'flex-end',
+    gap: Spacing.two,
   },
   decisionOverlay: {
     position: 'absolute',
@@ -1275,15 +1358,26 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   overlayIcon: {
-    width: 68,
-    height: 68,
+    width: DecisionRingSize,
+    height: DecisionRingSize,
+    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
     backgroundColor: LabColors.white,
   },
+  overlayProgressRing: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  overlayIconContent: {
+    zIndex: 1,
+  },
   overlayText: {
-    color: LabColors.white,
+    color: LabColors.bodyText,
     fontSize: 40,
     lineHeight: 46,
     fontWeight: 900,
@@ -1306,12 +1400,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
   },
   keepButton: {
-    backgroundColor: LabColors.white,
+    borderWidth: 3,
+    borderColor: LabColors.bodyText,
+    backgroundColor: LabColors.coral,
   },
   readButton: {
-    backgroundColor: LabColors.green,
+    borderWidth: 3,
+    borderColor: LabColors.bodyText,
+    backgroundColor: LabColors.mint,
   },
   decisionButtonText: {
+    color: LabColors.bodyText,
     fontSize: 18,
     lineHeight: 24,
     fontWeight: 900,
@@ -1324,12 +1423,14 @@ const styles = StyleSheet.create({
   },
   donePanel: {
     width: '100%',
-    borderRadius: 34,
+    borderRadius: 20,
     borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: LabColors.bodyText,
     backgroundColor: LabColors.white,
     padding: Spacing.four,
     gap: Spacing.three,
-    boxShadow: '0 22px 46px rgba(18, 8, 22, 0.24)',
+    boxShadow: LabColors.shadow,
   },
   doneIcon: {
     width: 64,
@@ -1337,7 +1438,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 999,
-    backgroundColor: 'rgba(46, 139, 98, 0.12)',
+    backgroundColor: LabColors.mintSoft,
   },
   doneTitle: {
     color: LabColors.text,
