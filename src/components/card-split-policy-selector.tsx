@@ -4,16 +4,16 @@ import { StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { GlideOptionSurface } from '@/components/ui/glide-option-surface';
 import { Spacing } from '@/constants/theme';
-import { useGenerationMode } from '@/hooks/use-generation-mode';
-import { type GenerationMode } from '@/lib/generation-mode';
+import { useCardSplitPolicy } from '@/hooks/use-card-split-policy';
+import { type CardSplitPolicy } from '@/lib/card-split-policy';
 
-type GenerationModeOption = {
+type CardSplitPolicyOption = {
   activeBackgroundColor: string;
   activeTextColor: string;
   caption: string;
   icon: SymbolViewProps['name'];
   label: string;
-  value: GenerationMode;
+  value: CardSplitPolicy;
 };
 
 const SelectorColors = {
@@ -26,30 +26,30 @@ const SelectorColors = {
   white: '#FFFFFF',
 } as const;
 
-const GenerationModeOptions: GenerationModeOption[] = [
+const CardSplitPolicyOptions: CardSplitPolicyOption[] = [
   {
-    value: 'natural',
-    label: '自然さ優先',
-    caption: '自然な一文',
+    value: 'meaning_unit',
+    label: '自然なまとまり',
+    caption: '流れを保って分ける',
     icon: { ios: 'text.bubble.fill', android: 'chat_bubble', web: 'chat_bubble' },
     activeBackgroundColor: SelectorColors.blue,
     activeTextColor: SelectorColors.white,
   },
   {
-    value: 'compact',
-    label: '短さ優先',
-    caption: '接続詞で分割',
+    value: 'small_steps',
+    label: '細かく分ける',
+    caption: '短いカードにする',
     icon: { ios: 'rectangle.split.2x1.fill', android: 'splitscreen', web: 'splitscreen' },
     activeBackgroundColor: SelectorColors.orange,
     activeTextColor: SelectorColors.ink,
   },
 ];
 
-export function GenerationModeSelector() {
-  const { generationMode, setGenerationMode } = useGenerationMode();
+export function CardSplitPolicySelector() {
+  const { cardSplitPolicy, setCardSplitPolicy } = useCardSplitPolicy();
   const selectedOption =
-    GenerationModeOptions.find((option) => option.value === generationMode) ??
-    GenerationModeOptions[0];
+    CardSplitPolicyOptions.find((option) => option.value === cardSplitPolicy) ??
+    CardSplitPolicyOptions[0];
 
   return (
     <View style={styles.section}>
@@ -58,8 +58,8 @@ export function GenerationModeSelector() {
           <ThemedText style={styles.sectionKickerText}>Build</ThemedText>
         </View>
         <View style={styles.titleRow}>
-          <ThemedText style={styles.sectionTitle} selectable>
-            カード生成
+            <ThemedText style={styles.sectionTitle} selectable>
+            カードの分け方
           </ThemedText>
           <View style={styles.currentBadge}>
             <ThemedText style={styles.currentBadgeText}>{selectedOption.label}</ThemedText>
@@ -68,11 +68,11 @@ export function GenerationModeSelector() {
       </View>
 
       <View style={styles.optionRow} accessibilityRole="radiogroup">
-        {GenerationModeOptions.map((option) => {
-          const isSelected = option.value === generationMode;
+        {CardSplitPolicyOptions.map((option) => {
+          const isSelected = option.value === cardSplitPolicy;
           const textColor = isSelected ? option.activeTextColor : SelectorColors.ink;
           const captionColor =
-            isSelected && option.value === 'natural'
+            isSelected && option.value === 'meaning_unit'
               ? 'rgba(255, 255, 255, 0.82)'
               : 'rgba(17, 17, 17, 0.66)';
 
@@ -81,7 +81,7 @@ export function GenerationModeSelector() {
               key={option.value}
               accessibilityRole="radio"
               accessibilityState={{ checked: isSelected }}
-              onPress={() => setGenerationMode(option.value)}
+              onPress={() => setCardSplitPolicy(option.value)}
               selected={isSelected}
               containerStyle={styles.optionSurface}
               style={[

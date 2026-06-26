@@ -45,7 +45,10 @@ create table public.practice_generations (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   diary_entry_id uuid not null references public.diary_entries(id) on delete cascade,
-  generation_mode text not null default 'compact' check (generation_mode in ('natural', 'compact')),
+  card_split_policy text not null default 'small_steps'
+    check (card_split_policy in ('meaning_unit', 'small_steps')),
+  translation_style text not null default 'native'
+    check (translation_style in ('native', 'simple')),
   practice_generation_status text not null default 'draft'
     check (practice_generation_status in ('draft', 'translating', 'completed', 'failed')),
   practice_generation_error text,
@@ -89,11 +92,11 @@ on public.diary_entries (user_id, created_at desc);
 create index practice_generations_user_created_idx
 on public.practice_generations (user_id, created_at desc);
 
-create unique index practice_generations_diary_mode_uidx
-on public.practice_generations (diary_entry_id, generation_mode);
+create unique index practice_generations_diary_split_policy_uidx
+on public.practice_generations (diary_entry_id, card_split_policy);
 
 create index practice_generations_diary_idx
-on public.practice_generations (diary_entry_id, generation_mode);
+on public.practice_generations (diary_entry_id, card_split_policy);
 
 create index translation_cards_user_created_idx
 on public.translation_cards (user_id, created_at desc);

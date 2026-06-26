@@ -1,7 +1,8 @@
 import { errorResponse, getAuthenticatedContext, jsonResponse, optionsResponse } from '../_shared/http.ts';
 import { createOpenAIJsonResponse } from '../_shared/openai.ts';
 
-type GenerationMode = 'natural' | 'compact';
+type CardSplitPolicy = 'meaning_unit' | 'small_steps';
+type TranslationStyle = 'native' | 'simple';
 
 type DraftCard = {
   japanese: string;
@@ -36,12 +37,13 @@ type DiaryEntryRow = {
 };
 
 type PracticeGenerationRow = {
+  card_split_policy: CardSplitPolicy;
   id: string;
   user_id: string;
   diary_entry_id: string;
-  generation_mode: GenerationMode;
   practice_generation_status: 'draft' | 'translating' | 'completed' | 'failed';
   practice_generation_error: string | null;
+  translation_style: TranslationStyle;
   created_at: string;
   updated_at: string;
 };
@@ -76,7 +78,7 @@ const draftSchema = {
 const diaryEntrySelect =
   'id, user_id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
-  'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
+  'id, user_id, diary_entry_id, card_split_policy, translation_style, practice_generation_status, practice_generation_error, created_at, updated_at';
 const translationCardSelect =
   'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
 
@@ -115,7 +117,7 @@ export default {
     }
 
     const source = body?.source === 'text' ? 'text' : 'voice';
-    const generationMode = parseGenerationMode(body?.generationMode);
+    const cardSplitPolicy = parseCardSplitPolicy(body?.cardSplitPolicy);
     const transcriptWords = source === 'voice' ? normalizeTranscriptWords(body?.transcriptWords) : [];
     const waveformPeaks = source === 'voice' ? normalizeWaveformPeaks(body?.waveformPeaks) : [];
 
@@ -125,7 +127,7 @@ export default {
       output = await createOpenAIJsonResponse<PreparePracticeDraftOutput>({
         schemaName: 'daily_to_english_practice_draft',
         schema: draftSchema,
-        instructions: createDraftInstructions(generationMode, transcriptWords.length > 0),
+        instructions: createDraftInstructions(cardSplitPolicy, transcriptWords.length > 0),
         input: createDraftInput(plainText, transcriptWords),
         maxOutputTokens: 4200,
       });
@@ -181,7 +183,7 @@ export default {
       .insert({
         user_id: userId,
         diary_entry_id: diaryEntry.id,
-        generation_mode: generationMode,
+        card_split_policy: cardSplitPolicy,
         practice_generation_status: 'draft',
         practice_generation_error: null,
       })
@@ -274,8 +276,8 @@ function normalizeContentForHash(value: string) {
   return value.replace(/\s+/g, ' ').trim();
 }
 
-function parseGenerationMode(value: unknown): GenerationMode {
-  return value === 'natural' ? 'natural' : 'compact';
+function parseCardSplitPolicy(value: unknown): CardSplitPolicy {
+  return value === 'meaning_unit' ? 'meaning_unit' : 'small_steps';
 }
 
 function createDraftInput(plainText: string, transcriptWords: TranscriptWord[]) {
@@ -380,7 +382,7 @@ function createCardTimestampFields(card: DraftCard, transcriptWords: TranscriptW
   };
 }
 
-function createDraftInstructions(generationMode: GenerationMode, hasTranscriptWords: boolean) {
+function createDraftInstructions(cardSplitPolicy: CardSplitPolicy, hasTranscriptWords: boolean) {
   const commonInstructions = [
     'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
     '入力は JSON です。plainText は日本語の文字起こし、またはユーザーが書いた日本語の日記本文です。',
@@ -409,10 +411,10 @@ function createDraftInstructions(generationMode: GenerationMode, hasTranscriptWo
     'カード数に上限はありません。無理に増やさず、自然に分けられる分だけ返してください。',
   ];
 
-  const modeInstructions =
-    generationMode === 'compact'
+  const policyInstructions =
+    cardSplitPolicy === 'small_steps'
       ? [
-          '現在の生成モードは「短さ優先」です。',
+          '現在のカード分割方針は「細かく分ける」です。',
           'フラッシュカードとして覚えやすい短さを優先し、1カード1アイデアを基本にしてください。',
           'and, but, so などの接続詞で自然に分けられる英語文は、一文に詰め込まずカードを分けてください。',
           'because, while, although, if などで長い複文になる場合も、意味が自然に独立するなら分割してください。',
@@ -420,13 +422,13 @@ function createDraftInstructions(generationMode: GenerationMode, hasTranscriptWo
           '英語化後の目安は1カード12〜16語程度です。ただし自然さや意味の欠落防止が必要なら少し超えて構いません。',
         ]
       : [
-          '現在の生成モードは「自然さ優先」です。',
-          '自然な話し言葉としての英語を優先してください。',
-          '1枚が少し長くなっても、意味の流れとネイティブらしさを崩さないでください。',
+          '現在のカード分割方針は「自然なまとまり」です。',
+          '英語にしたときの意味の流れを優先し、自然なまとまりを保ってください。',
+          '1枚が少し長くなっても、話の流れや感情のつながりが崩れるなら無理に分割しないでください。',
           'and, but, so などでつながる一文が自然なら、無理に分割しないでください。',
         ];
 
-  return [...commonInstructions, ...modeInstructions].join('\n');
+  return [...commonInstructions, ...policyInstructions].join('\n');
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -460,10 +462,11 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
 
 function toPublicPracticeGeneration(practiceGeneration: PracticeGenerationRow) {
   return {
+    card_split_policy: practiceGeneration.card_split_policy,
     id: practiceGeneration.id,
     diary_entry_id: practiceGeneration.diary_entry_id,
-    generation_mode: practiceGeneration.generation_mode,
     practice_generation_status: practiceGeneration.practice_generation_status,
+    translation_style: practiceGeneration.translation_style,
     created_at: practiceGeneration.created_at,
   };
 }

@@ -16,7 +16,8 @@ import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideTextInput } from '@/components/ui/glide-text-input';
 import { MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
-import { useGenerationMode } from '@/hooks/use-generation-mode';
+import { useCardSplitPolicy } from '@/hooks/use-card-split-policy';
+import { useTranslationStyle } from '@/hooks/use-translation-style';
 import {
   appendMeteringSample,
   createWaveformPeaksFromMetering,
@@ -64,7 +65,8 @@ export default function HomeScreen() {
   const palette = useDailyPalette();
   const audioRecorder = useAudioRecorder(DailyRecordingOptions);
   const recorderState = useAudioRecorderState(audioRecorder, RecordingStatusIntervalMs);
-  const { generationMode } = useGenerationMode();
+  const { cardSplitPolicy } = useCardSplitPolicy();
+  const { translationStyle } = useTranslationStyle();
   const [entryMode, setEntryMode] = useState<EntryMode>('voice');
   const [diaryDraftText, setDiaryDraftText] = useState('');
   const [diaryDraftSource, setDiaryDraftSource] = useState<DiaryDraftSource>('text');
@@ -90,7 +92,7 @@ export default function HomeScreen() {
   const resetDraftOnBlurRef = useRef(false);
   const draftInteractionVersionRef = useRef(0);
   const waveformMeteringSamplesRef = useRef<number[]>([]);
-  const currentDraft = activeDraft?.generationMode === generationMode ? activeDraft : null;
+  const currentDraft = activeDraft?.cardSplitPolicy === cardSplitPolicy ? activeDraft : null;
 
   const isRecordingButtonActive = recorderState.isRecording || isStoppingRecording;
   const isWritingButtonActive =
@@ -214,7 +216,7 @@ export default function HomeScreen() {
         if (
           isCancelled ||
           !draft ||
-          draft.generationMode !== generationMode ||
+          draft.cardSplitPolicy !== cardSplitPolicy ||
           draftInteractionVersionRef.current !== restoreInteractionVersion
         ) {
           return;
@@ -235,7 +237,7 @@ export default function HomeScreen() {
     return () => {
       isCancelled = true;
     };
-  }, [applyPracticeDraft, generationMode]);
+  }, [applyPracticeDraft, cardSplitPolicy]);
 
   useEffect(() => {
     const failedRetryRecording = getLatestFailedRetryRecording();
@@ -490,6 +492,7 @@ export default function HomeScreen() {
 
     try {
       const draft = await preparePracticeDraft({
+        cardSplitPolicy,
         diaryText: normalizedDiaryText,
         source,
         cleanedText: normalizedDiaryText,
@@ -497,7 +500,6 @@ export default function HomeScreen() {
           source === 'voice' ? nextRawTranscriptText ?? normalizedDiaryText : normalizedDiaryText,
         transcriptWords: source === 'voice' ? nextTranscriptWords ?? transcriptWords : [],
         waveformPeaks: nextVoiceWaveformPeaks,
-        generationMode,
       });
       applyPracticeDraft(draft);
 
@@ -544,6 +546,7 @@ export default function HomeScreen() {
     try {
       const practice = await completePracticeDraft({
         practiceGenerationId: currentDraft.practiceGenerationId,
+        translationStyle,
         cards: draftCards.map((card) => ({
           id: card.id,
           japanese: card.japanese,

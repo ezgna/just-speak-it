@@ -5,19 +5,22 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import '@/global.css';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
-import { GenerationModeProvider } from '@/hooks/use-generation-mode';
+import { CardSplitPolicyProvider } from '@/hooks/use-card-split-policy';
 import {
   ThemePreferenceProvider,
   useResolvedColorScheme,
 } from '@/hooks/use-theme-preference';
+import { TranslationStyleProvider } from '@/hooks/use-translation-style';
 
 export default function TabLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <ThemePreferenceProvider>
-        <GenerationModeProvider>
-          <RootNavigator />
-        </GenerationModeProvider>
+        <CardSplitPolicyProvider>
+          <TranslationStyleProvider>
+            <RootNavigator />
+          </TranslationStyleProvider>
+        </CardSplitPolicyProvider>
       </ThemePreferenceProvider>
     </GestureHandlerRootView>
   );

@@ -1,8 +1,9 @@
 import { ensureAnonymousSession } from '@/lib/backend/auth';
 import type { TranscriptionWord } from '@/lib/backend/transcription';
 import { normalizeWaveformPeaks } from '@/lib/audio/waveform';
-import { type GenerationMode } from '@/lib/generation-mode';
+import { type CardSplitPolicy } from '@/lib/card-split-policy';
 import { requireSupabaseClient } from '@/lib/supabase/client';
+import { type TranslationStyle } from '@/lib/translation-style';
 
 export type TranslationCard = {
   id: string;
@@ -44,8 +45,8 @@ export type PracticeDiaryEntry = {
 };
 
 export type PracticeDraft = {
+  cardSplitPolicy: CardSplitPolicy;
   diaryEntry: PracticeDiaryEntry;
-  generationMode: GenerationMode;
   practiceGenerationId: string;
   source: 'text' | 'voice';
   status: 'draft';
@@ -54,20 +55,22 @@ export type PracticeDraft = {
 };
 
 export type CompletedPractice = {
+  cardSplitPolicy: CardSplitPolicy;
   diaryEntry: PracticeDiaryEntry;
-  generationMode: GenerationMode;
   practiceGenerationId: string;
   source: 'text' | 'voice';
   status: 'completed';
+  translationStyle: TranslationStyle;
   cards: TranslationCard[];
   createdAt: string;
 };
 
 export type TranslationCardGroup = {
+  cardSplitPolicy: CardSplitPolicy;
   diaryEntryId: string;
-  generationMode: GenerationMode;
   practiceGenerationId: string;
   source: 'text' | 'voice';
+  translationStyle: TranslationStyle;
   diaryText: string;
   diaryExcerpt: string;
   createdAt: string;
@@ -116,17 +119,18 @@ type DiaryEntryGroupRow = {
 };
 
 type PracticeGenerationRow = {
+  card_split_policy: CardSplitPolicy;
   id: string;
   diary_entry_id: string;
-  generation_mode: GenerationMode;
   practice_generation_status?: PracticeGenerationStatus;
+  translation_style: TranslationStyle;
   created_at: string;
   updated_at?: string;
 };
 
 export type PreparePracticeDraftParams = {
+  cardSplitPolicy?: CardSplitPolicy;
   diaryText: string;
-  generationMode?: GenerationMode;
   source: 'text' | 'voice';
   rawTranscriptText?: string;
   cleanedText?: string;
@@ -146,10 +150,11 @@ type PracticeFunctionDiaryEntry = {
 };
 
 type PracticeFunctionGeneration = {
+  card_split_policy: CardSplitPolicy;
   id: string;
   diary_entry_id: string;
-  generation_mode: GenerationMode;
   practice_generation_status: PracticeGenerationStatus;
+  translation_style: TranslationStyle;
   created_at: string;
 };
 
@@ -161,6 +166,7 @@ export type PreparePracticeDraftResponse = {
 
 export type CompletePracticeDraftParams = {
   practiceGenerationId: string;
+  translationStyle?: TranslationStyle;
   cards: { id: string; japanese: string }[];
 };
 
@@ -174,8 +180,8 @@ const translationCardSelect =
   'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
 
 export async function preparePracticeDraft({
+  cardSplitPolicy = 'small_steps',
   diaryText,
-  generationMode = 'compact',
   source,
   rawTranscriptText,
   cleanedText,
@@ -189,8 +195,8 @@ export async function preparePracticeDraft({
     'prepare-practice-draft',
     {
       body: {
+        cardSplitPolicy,
         diaryText,
-        generationMode,
         source,
         rawTranscriptText,
         cleanedText,
@@ -213,6 +219,7 @@ export async function preparePracticeDraft({
 
 export async function completePracticeDraft({
   practiceGenerationId,
+  translationStyle = 'native',
   cards,
 }: CompletePracticeDraftParams) {
   await ensureAnonymousSession();
@@ -223,6 +230,7 @@ export async function completePracticeDraft({
     {
       body: {
         practiceGenerationId,
+        translationStyle,
         cards,
       },
     }
@@ -245,7 +253,7 @@ export async function getLatestPracticeDraft() {
   const supabase = requireSupabaseClient();
   const { data: generationRows, error: generationError } = await supabase
     .from('practice_generations')
-    .select('id, diary_entry_id, generation_mode, practice_generation_status, created_at, updated_at')
+    .select('id, diary_entry_id, card_split_policy, translation_style, practice_generation_status, created_at, updated_at')
     .eq('practice_generation_status', 'draft')
     .order('updated_at', { ascending: false })
     .limit(1);
@@ -289,8 +297,8 @@ export async function getLatestPracticeDraft() {
   }
 
   return {
+    cardSplitPolicy: generation.card_split_policy,
     diaryEntry: mapPracticeDiaryEntry(diaryEntry as DiaryEntryRow),
-    generationMode: generation.generation_mode,
     practiceGenerationId: generation.id,
     source: (diaryEntry as DiaryEntryRow).source,
     status: 'draft',
@@ -329,10 +337,14 @@ export async function discardPracticeDraft(practiceGenerationId: string) {
   }
 }
 
-export async function generatePracticeFromDiary(params: PreparePracticeDraftParams) {
+export async function generatePracticeFromDiary({
+  translationStyle = 'native',
+  ...params
+}: PreparePracticeDraftParams & { translationStyle?: TranslationStyle }) {
   const draft = await preparePracticeDraft(params);
   return completePracticeDraft({
     practiceGenerationId: draft.practiceGenerationId,
+    translationStyle,
     cards: draft.cards.map((card) => ({
       id: card.id,
       japanese: card.japanese,
@@ -342,8 +354,8 @@ export async function generatePracticeFromDiary(params: PreparePracticeDraftPara
 
 function mapPracticeDraftResponse(data: PreparePracticeDraftResponse): PracticeDraft {
   return {
+    cardSplitPolicy: data.practiceGeneration.card_split_policy,
     diaryEntry: mapPracticeFunctionDiaryEntry(data.diaryEntry),
-    generationMode: data.practiceGeneration.generation_mode,
     practiceGenerationId: data.practiceGeneration.id,
     source: data.diaryEntry.source,
     status: 'draft',
@@ -354,11 +366,12 @@ function mapPracticeDraftResponse(data: PreparePracticeDraftResponse): PracticeD
 
 function mapCompletedPracticeResponse(data: CompletePracticeResponse): CompletedPractice {
   return {
+    cardSplitPolicy: data.practiceGeneration.card_split_policy,
     diaryEntry: mapPracticeFunctionDiaryEntry(data.diaryEntry),
-    generationMode: data.practiceGeneration.generation_mode,
     practiceGenerationId: data.practiceGeneration.id,
     source: data.diaryEntry.source,
     status: 'completed',
+    translationStyle: data.practiceGeneration.translation_style,
     cards: data.cards.map(mapTranslationCard),
     createdAt: data.practiceGeneration.created_at,
   };
@@ -421,7 +434,7 @@ export async function listTranslationCardGroups() {
   const supabase = requireSupabaseClient();
   const { data: generationRows, error: generationsError } = await supabase
     .from('practice_generations')
-    .select('id, diary_entry_id, generation_mode, created_at')
+    .select('id, diary_entry_id, card_split_policy, translation_style, created_at')
     .eq('practice_generation_status', 'completed')
     .order('created_at', { ascending: false });
 
@@ -487,10 +500,11 @@ export async function listTranslationCardGroups() {
       }
 
       return {
+        cardSplitPolicy: generation.card_split_policy,
         diaryEntryId: entry.id,
-        generationMode: generation.generation_mode,
         practiceGenerationId: generation.id,
         source: entry.source,
+        translationStyle: generation.translation_style,
         diaryText: normalizeDiaryBodyText(entry.plain_text),
         diaryExcerpt: createDiaryExcerpt(entry.plain_text),
         createdAt: entry.created_at,

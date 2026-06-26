@@ -2,12 +2,13 @@ import type { TranslationCard, TranslationCardGroup } from '@/lib/backend/practi
 import type { CardLearningStatus } from '@/lib/card-learning-statuses';
 
 export type PracticeCard = TranslationCard & {
+  cardSplitPolicy: TranslationCardGroup['cardSplitPolicy'];
   diaryEntryId: TranslationCardGroup['diaryEntryId'];
   diaryText: string;
   diaryExcerpt: string;
   diaryCreatedAt: string;
-  generationMode: TranslationCardGroup['generationMode'];
   source: TranslationCardGroup['source'];
+  translationStyle: TranslationCardGroup['translationStyle'];
 };
 
 export const StatusPriority: Record<CardLearningStatus, number> = {
@@ -20,12 +21,13 @@ export function flattenTranslationCardGroups(groups: TranslationCardGroup[]): Pr
   return groups.flatMap((group) =>
     group.cards.map((card) => ({
       ...card,
+      cardSplitPolicy: group.cardSplitPolicy,
       diaryEntryId: group.diaryEntryId,
       diaryText: group.diaryText,
       diaryExcerpt: group.diaryExcerpt,
       diaryCreatedAt: group.createdAt,
-      generationMode: group.generationMode,
       source: group.source,
+      translationStyle: group.translationStyle,
     }))
   );
 }

@@ -58,32 +58,35 @@ export type Database = {
       }
       practice_generations: {
         Row: {
+          card_split_policy: string
           created_at: string
           diary_entry_id: string
-          generation_mode: string
           id: string
           practice_generation_error: string | null
           practice_generation_status: string
+          translation_style: string
           updated_at: string
           user_id: string
         }
         Insert: {
+          card_split_policy?: string
           created_at?: string
           diary_entry_id: string
-          generation_mode?: string
           id?: string
           practice_generation_error?: string | null
           practice_generation_status?: string
+          translation_style?: string
           updated_at?: string
           user_id: string
         }
         Update: {
+          card_split_policy?: string
           created_at?: string
           diary_entry_id?: string
-          generation_mode?: string
           id?: string
           practice_generation_error?: string | null
           practice_generation_status?: string
+          translation_style?: string
           updated_at?: string
           user_id?: string
         }

@@ -24,12 +24,14 @@ import { router, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useState } from 'react';
 
-import { useGenerationMode } from '@/hooks/use-generation-mode';
+import { useCardSplitPolicy } from '@/hooks/use-card-split-policy';
 import {
   type ThemePreference,
   useThemePreference,
 } from '@/hooks/use-theme-preference';
-import { type GenerationMode } from '@/lib/generation-mode';
+import { useTranslationStyle } from '@/hooks/use-translation-style';
+import { type CardSplitPolicy } from '@/lib/card-split-policy';
+import { type TranslationStyle } from '@/lib/translation-style';
 import { isSupabaseConfigured, supabaseUrl } from '@/lib/supabase/client';
 
 const ThemePreferenceOptions = [
@@ -38,10 +40,15 @@ const ThemePreferenceOptions = [
   { label: 'ダーク', value: 'dark' },
 ] satisfies readonly { label: string; value: ThemePreference }[];
 
-const GenerationModeOptions = [
-  { caption: '自然な一文', label: '自然さ優先', value: 'natural' },
-  { caption: '接続詞で分割', label: '短さ優先', value: 'compact' },
-] satisfies readonly { caption: string; label: string; value: GenerationMode }[];
+const CardSplitPolicyOptions = [
+  { caption: '流れを保って分ける', label: '自然なまとまり', value: 'meaning_unit' },
+  { caption: '短いカードにする', label: '細かく分ける', value: 'small_steps' },
+] satisfies readonly { caption: string; label: string; value: CardSplitPolicy }[];
+
+const TranslationStyleOptions = [
+  { caption: 'ネイティブ表現', label: '自然さ優先', value: 'native' },
+  { caption: 'やさしい語彙と文', label: '簡単さ優先', value: 'simple' },
+] satisfies readonly { caption: string; label: string; value: TranslationStyle }[];
 
 const MemoStackerCopyAccent = '#276EF1';
 const fadeButtonStateAnimation = Animation.easeInOut({ duration: 0.16 });
@@ -52,7 +59,8 @@ export default function WorkbenchScreen() {
     setThemePreference,
     themePreference,
   } = useThemePreference();
-  const { generationMode, setGenerationMode } = useGenerationMode();
+  const { cardSplitPolicy, setCardSplitPolicy } = useCardSplitPolicy();
+  const { setTranslationStyle, translationStyle } = useTranslationStyle();
   const colors = WorkbenchColors[colorScheme];
 
   return (
@@ -100,14 +108,19 @@ export default function WorkbenchScreen() {
           </FieldGroup.Section>
 
           <FieldGroup.Section title="生成">
-            <GenerationModeRow
+            <CardSplitPolicyRow
               colors={colors}
-              onValueChange={setGenerationMode}
-              selectedValue={generationMode}
+              onValueChange={setCardSplitPolicy}
+              selectedValue={cardSplitPolicy}
+            />
+            <TranslationStyleRow
+              colors={colors}
+              onValueChange={setTranslationStyle}
+              selectedValue={translationStyle}
             />
             <FieldGroup.SectionFooter>
               <Text textStyle={getFooterTextStyle(colors)}>
-                練習カード生成で使う文のまとめ方を切り替えます。
+                カードの分け方と英訳の言い回しを別々に切り替えます。
               </Text>
             </FieldGroup.SectionFooter>
           </FieldGroup.Section>
@@ -166,21 +179,43 @@ export default function WorkbenchScreen() {
   );
 }
 
-function GenerationModeRow({
+function CardSplitPolicyRow({
   colors,
   onValueChange,
   selectedValue,
 }: {
   colors: WorkbenchColorSet;
-  onValueChange: (nextMode: GenerationMode) => void;
-  selectedValue: GenerationMode;
+  onValueChange: (nextPolicy: CardSplitPolicy) => void;
+  selectedValue: CardSplitPolicy;
 }) {
   return (
     <Row alignment="center" spacing={10}>
-      <Text textStyle={getPrimaryTextStyle(colors)}>カード生成</Text>
+      <Text textStyle={getPrimaryTextStyle(colors)}>カードの分け方</Text>
       <Spacer flexible />
-      <Picker<GenerationMode> selectedValue={selectedValue} onValueChange={onValueChange}>
-        {GenerationModeOptions.map((option) => (
+      <Picker<CardSplitPolicy> selectedValue={selectedValue} onValueChange={onValueChange}>
+        {CardSplitPolicyOptions.map((option) => (
+          <Picker.Item key={option.value} label={option.label} value={option.value} />
+        ))}
+      </Picker>
+    </Row>
+  );
+}
+
+function TranslationStyleRow({
+  colors,
+  onValueChange,
+  selectedValue,
+}: {
+  colors: WorkbenchColorSet;
+  onValueChange: (nextStyle: TranslationStyle) => void;
+  selectedValue: TranslationStyle;
+}) {
+  return (
+    <Row alignment="center" spacing={10}>
+      <Text textStyle={getPrimaryTextStyle(colors)}>英訳スタイル</Text>
+      <Spacer flexible />
+      <Picker<TranslationStyle> selectedValue={selectedValue} onValueChange={onValueChange}>
+        {TranslationStyleOptions.map((option) => (
           <Picker.Item key={option.value} label={option.label} value={option.value} />
         ))}
       </Picker>

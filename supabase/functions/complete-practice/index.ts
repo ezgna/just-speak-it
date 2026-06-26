@@ -1,7 +1,8 @@
 import { errorResponse, getAuthenticatedContext, jsonResponse, optionsResponse } from '../_shared/http.ts';
 import { createOpenAIJsonResponse } from '../_shared/openai.ts';
 
-type GenerationMode = 'natural' | 'compact';
+type CardSplitPolicy = 'meaning_unit' | 'small_steps';
+type TranslationStyle = 'native' | 'simple';
 type PracticeGenerationStatus = 'draft' | 'translating' | 'completed' | 'failed';
 
 type CompletePracticeCardInput = {
@@ -33,12 +34,13 @@ type DiaryEntryRow = {
 };
 
 type PracticeGenerationRow = {
+  card_split_policy: CardSplitPolicy;
   id: string;
   user_id: string;
   diary_entry_id: string;
-  generation_mode: GenerationMode;
   practice_generation_status: PracticeGenerationStatus;
   practice_generation_error: string | null;
+  translation_style: TranslationStyle;
   created_at: string;
   updated_at: string;
 };
@@ -80,7 +82,7 @@ const translationSchema = {
 const diaryEntrySelect =
   'id, user_id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
-  'id, user_id, diary_entry_id, generation_mode, practice_generation_status, practice_generation_error, created_at, updated_at';
+  'id, user_id, diary_entry_id, card_split_policy, translation_style, practice_generation_status, practice_generation_error, created_at, updated_at';
 const translationCardSelect =
   'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
 
@@ -103,6 +105,7 @@ export default {
     const body = await req.json().catch(() => null);
     const practiceGenerationId =
       typeof body?.practiceGenerationId === 'string' ? body.practiceGenerationId.trim() : '';
+    const translationStyle = parseTranslationStyle(body?.translationStyle);
     const cardInputs = parseCardInputs(body?.cards);
 
     if (!practiceGenerationId) {
@@ -156,6 +159,7 @@ export default {
       .update({
         practice_generation_status: 'translating',
         practice_generation_error: null,
+        translation_style: translationStyle,
       })
       .eq('id', generation.id)
       .eq('practice_generation_status', 'draft')
@@ -176,7 +180,7 @@ export default {
       output = await createOpenAIJsonResponse<CompletePracticeOutput>({
         schemaName: 'daily_to_english_completed_practice',
         schema: translationSchema,
-        instructions: createTranslationInstructions(generation.generation_mode),
+        instructions: createTranslationInstructions(translationStyle),
         input: JSON.stringify({
           cards: orderedCards.cards.map((card) => ({
             id: card.id,
@@ -366,6 +370,10 @@ function validateTranslations(
   return { type: 'translations' as const, byId };
 }
 
+function parseTranslationStyle(value: unknown): TranslationStyle {
+  return value === 'simple' ? 'simple' : 'native';
+}
+
 async function returnCompletedPractice(
   context: { supabase: any },
   practiceGeneration: PracticeGenerationRow
@@ -415,31 +423,32 @@ async function markGenerationFailed(
     .eq('id', practiceGenerationId);
 }
 
-function createTranslationInstructions(generationMode: GenerationMode) {
+function createTranslationInstructions(translationStyle: TranslationStyle) {
   const commonInstructions = [
     'あなたは日本語話者の自然な英語表現を作るネイティブ編集者です。',
     '入力は、すでに英語カード用に分割済みの日本語カード配列です。',
     'カードを結合、分割、削除、並べ替えしないでください。',
     '必ず入力と同じidを、同じカード境界のまま返してください。',
-    'english は直訳や教材っぽい説明文にせず、ネイティブが日常会話で自然に言う一文にしてください。',
+    'english は直訳や教材っぽい説明文にせず、日常会話で自然に言える一文にしてください。',
     'japanese の意味、出来事、感情、温度感を保ってください。事実や理由を新しく足さないでください。',
     '文の断片ではなく、それぞれ単独で自然に言える英語文にしてください。',
   ];
 
-  const modeInstructions =
-    generationMode === 'compact'
+  const styleInstructions =
+    translationStyle === 'simple'
       ? [
-          '現在の生成モードは「短さ優先」です。',
-          '各 english はできるだけ短く、覚えやすい一文にしてください。',
-          '目安は12〜16語程度です。ただし自然さや意味の欠落防止が必要なら少し超えて構いません。',
+          '現在の英訳スタイルは「簡単さ優先」です。',
+          '自然さは保ちつつ、基本語彙、短い文、単純な文構造を優先してください。',
+          '難しいイディオム、句動詞、熟語、凝った言い換えは避け、学習者がそのまま覚えやすい表現にしてください。',
+          '目安は1文12〜16語程度です。ただし意味の欠落防止が必要なら少し超えて構いません。',
         ]
       : [
-          '現在の生成モードは「自然さ優先」です。',
-          '自然な話し言葉としての英語を優先してください。',
-          '少し長くなっても、意味の流れとネイティブらしさを崩さないでください。',
+          '現在の英訳スタイルは「自然さ優先」です。',
+          'ネイティブが日常会話で自然によく使う語彙、句動詞、熟語、イディオム、自然な言い回しを適切に使ってください。',
+          '直訳っぽさや教材っぽさを避け、少し長くなっても意味の流れとネイティブらしさを優先してください。',
         ];
 
-  return [...commonInstructions, ...modeInstructions].join('\n');
+  return [...commonInstructions, ...styleInstructions].join('\n');
 }
 
 function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
@@ -457,10 +466,11 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
 
 function toPublicPracticeGeneration(practiceGeneration: PracticeGenerationRow) {
   return {
+    card_split_policy: practiceGeneration.card_split_policy,
     id: practiceGeneration.id,
     diary_entry_id: practiceGeneration.diary_entry_id,
-    generation_mode: practiceGeneration.generation_mode,
     practice_generation_status: practiceGeneration.practice_generation_status,
+    translation_style: practiceGeneration.translation_style,
     created_at: practiceGeneration.created_at,
   };
 }

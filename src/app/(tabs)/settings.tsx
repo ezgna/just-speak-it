@@ -2,10 +2,11 @@ import { router } from 'expo-router';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { GenerationModeSelector } from '@/components/generation-mode-selector';
+import { CardSplitPolicySelector } from '@/components/card-split-policy-selector';
 import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { LocalRecordingSettings } from '@/components/local-recording-settings';
 import { ThemePreferenceSelector } from '@/components/theme-preference-selector';
+import { TranslationStyleSelector } from '@/components/translation-style-selector';
 import { GlideButton } from '@/components/ui/glide-button';
 import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 
@@ -56,7 +57,8 @@ export default function SettingsScreen() {
         ) : null}
 
         <ThemePreferenceSelector />
-        <GenerationModeSelector />
+        <CardSplitPolicySelector />
+        <TranslationStyleSelector />
         <LocalRecordingSettings />
       </View>
     </ScrollView>
