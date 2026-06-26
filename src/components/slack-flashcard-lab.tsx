@@ -82,6 +82,7 @@ const AnswerTextMetrics = {
   fontSize: 28,
   lineHeight: 38,
 };
+const AnswerSoundControlSize = 40;
 const DecisionRingSize = 68;
 const DecisionRingStrokeWidth = 4;
 const DecisionRingStartOffset = 32;
@@ -747,6 +748,7 @@ const SlackCardLayer = memo(function SlackCardLayer({
       <View style={styles.cardClip}>
         <SlackCardFace
           card={card}
+          cardHeight={cardHeight}
           isAnswerVisible={position === 0 && isAnswerVisible}
           isPreview={position !== 0}
           onToggleAnswer={position === 0 ? onToggleAnswer : undefined}
@@ -813,11 +815,13 @@ function LabHeader({
 
 const SlackCardFace = memo(function SlackCardFace({
   card,
+  cardHeight,
   isAnswerVisible,
   isPreview = false,
   onToggleAnswer,
 }: {
   card: PracticeCard;
+  cardHeight: number;
   isAnswerVisible: boolean;
   isPreview?: boolean;
   onToggleAnswer?: () => void;
@@ -825,7 +829,14 @@ const SlackCardFace = memo(function SlackCardFace({
   const [isSpeaking, setIsSpeaking] = useState(false);
   const flipAccessibilityLabel = isAnswerVisible ? '日本語を表示する' : '英語を表示する';
   const cardBodyText = isAnswerVisible ? card.english : card.japanese;
-  const cardBodyMaxLines = isAnswerVisible ? 7 : 8;
+  const answerBodyMaxLines = Math.max(
+    4,
+    Math.floor(
+      (cardHeight - Spacing.three * 2 - AnswerSoundControlSize * 2) /
+        AnswerTextMetrics.lineHeight
+    )
+  );
+  const cardBodyMaxLines = isAnswerVisible ? Math.min(7, answerBodyMaxLines) : 8;
   const cardBodyTextStyle = isAnswerVisible ? styles.answerText : styles.promptText;
 
   useEffect(() => {
@@ -893,9 +904,14 @@ const SlackCardFace = memo(function SlackCardFace({
             accessibilityRole="button"
             accessibilityLabel={flipAccessibilityLabel}
             onAccessibilityTap={onToggleAnswer}
-            style={styles.answerTouchArea}>
+            style={[
+              styles.answerTouchArea,
+              isAnswerVisible ? styles.answerTouchAreaWithSoundControls : null,
+            ]}>
             <ThemedText
               style={cardBodyTextStyle}
+              adjustsFontSizeToFit
+              minimumFontScale={0.88}
               numberOfLines={cardBodyMaxLines}
               selectable>
               {cardBodyText}
@@ -909,7 +925,7 @@ const SlackCardFace = memo(function SlackCardFace({
               diaryEntryId={card.diaryEntryId}
               audioStartSec={card.audioStartSec}
               audioEndSec={card.audioEndSec}
-              size={40}
+              size={AnswerSoundControlSize}
               iconSize={18}
               backgroundColor={LabColors.cardTint}
               activeBackgroundColor={LabColors.mint}
@@ -1302,6 +1318,9 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
   },
+  answerTouchAreaWithSoundControls: {
+    paddingTop: AnswerSoundControlSize,
+  },
   promptText: {
     color: LabColors.text,
     fontSize: PromptTextMetrics.fontSize,
@@ -1315,8 +1334,8 @@ const styles = StyleSheet.create({
     fontWeight: 900,
   },
   soundButton: {
-    width: 40,
-    height: 40,
+    width: AnswerSoundControlSize,
+    height: AnswerSoundControlSize,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 12,
