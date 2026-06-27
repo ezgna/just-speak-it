@@ -27,6 +27,7 @@ type DiaryEntryRow = {
   source: 'text' | 'voice';
   original_text: string;
   plain_text: string;
+  is_transcript_edited: boolean;
   bullet_points: unknown;
   transcript_words: unknown;
   waveform_peaks: unknown;
@@ -94,7 +95,7 @@ const draftSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, is_transcript_edited, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, client_request_id, card_split_policy, translation_style, status, error_message, created_at, updated_at';
 const translationCardSelect =
@@ -165,7 +166,7 @@ export default {
       .filter((card) => card.japanese);
 
     if (cardDrafts.length === 0) {
-      return errorResponse('分割カードを作成できませんでした。', 502);
+      return errorResponse('英語カードにできる内容が見つかりませんでした。', 502);
     }
 
     const contentHash = await createContentHash(request.cleanedText);
@@ -178,6 +179,7 @@ export default {
       p_draft_model: getOpenAITextModel(),
       p_draft_prompt_version: DraftPromptVersion,
       p_draft_schema_version: DraftSchemaVersion,
+      p_is_transcript_edited: request.isTranscriptEdited,
       p_original_text: request.rawTranscriptText,
       p_plain_text: request.cleanedText,
       p_source: request.source,
@@ -436,6 +438,7 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     source: diaryEntry.source,
     original_text: diaryEntry.original_text,
     plain_text: diaryEntry.plain_text,
+    is_transcript_edited: diaryEntry.is_transcript_edited,
     bullet_points: diaryEntry.bullet_points,
     transcript_words: diaryEntry.transcript_words,
     waveform_peaks: diaryEntry.waveform_peaks,

@@ -23,6 +23,7 @@ import {
   createWaveformPeaksFromMetering,
   normalizeWaveformPeaks,
 } from '@/lib/audio/waveform';
+import { formatBackendErrorForDisplay, logBackendError } from '@/lib/backend/errors';
 import {
   completePracticeDraft,
   discardPracticeDraft,
@@ -79,6 +80,7 @@ export default function HomeScreen() {
   const [isPreparingDraft, setIsPreparingDraft] = useState(false);
   const [isCompletingPractice, setIsCompletingPractice] = useState(false);
   const [rawTranscriptText, setRawTranscriptText] = useState<string | null>(null);
+  const [isTranscriptEdited, setIsTranscriptEdited] = useState(false);
   const [transcriptWords, setTranscriptWords] = useState<TranscriptionWord[]>([]);
   const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null);
@@ -199,6 +201,7 @@ export default function HomeScreen() {
     setDiaryDraftText('');
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
+    setIsTranscriptEdited(false);
     setTranscriptWords([]);
     setWaveformPeaks([]);
     setTranscriptionError(null);
@@ -216,6 +219,7 @@ export default function HomeScreen() {
     setDiaryDraftText(draft.diaryEntry.plainText);
     setDiaryDraftSource(draft.source);
     setRawTranscriptText(draft.source === 'voice' ? draft.diaryEntry.originalText : null);
+    setIsTranscriptEdited(draft.source === 'voice' ? draft.diaryEntry.isTranscriptEdited : false);
     setTranscriptWords(draft.source === 'voice' ? draft.diaryEntry.transcriptWords : []);
     setWaveformPeaks(draft.source === 'voice' ? draft.diaryEntry.waveformPeaks : []);
     setTranscriptionError(null);
@@ -336,6 +340,7 @@ export default function HomeScreen() {
       setDiaryDraftText('');
       setDiaryDraftSource('voice');
       setRawTranscriptText(null);
+      setIsTranscriptEdited(false);
       setTranscriptWords([]);
       setWaveformPeaks([]);
       setActiveDraft(null);
@@ -450,6 +455,7 @@ export default function HomeScreen() {
       const cleanedText = transcript.cleanedText.trim();
       clearDraftClientRequestId();
       setRawTranscriptText(cleanedText ? transcript.rawText : null);
+      setIsTranscriptEdited(false);
       setTranscriptWords(cleanedText ? transcript.words : []);
       setWaveformPeaks(cleanedText ? normalizedWaveformPeaks : []);
       setDiaryDraftText(cleanedText);
@@ -483,6 +489,7 @@ export default function HomeScreen() {
     rawTranscriptText: nextRawTranscriptText,
     transcriptWords: nextTranscriptWords,
     waveformPeaks: nextWaveformPeaks,
+    isTranscriptEdited: nextIsTranscriptEdited,
     localRecordingId,
   }: {
     diaryText: string;
@@ -490,6 +497,7 @@ export default function HomeScreen() {
     rawTranscriptText?: string | null;
     transcriptWords?: TranscriptionWord[];
     waveformPeaks?: number[];
+    isTranscriptEdited?: boolean;
     localRecordingId?: string | null;
   }) {
     markDraftInteraction();
@@ -523,6 +531,7 @@ export default function HomeScreen() {
         cleanedText: normalizedDiaryText,
         rawTranscriptText:
           source === 'voice' ? nextRawTranscriptText ?? normalizedDiaryText : normalizedDiaryText,
+        isTranscriptEdited: source === 'voice' ? Boolean(nextIsTranscriptEdited) : false,
         transcriptWords: source === 'voice' ? nextTranscriptWords ?? transcriptWords : [],
         waveformPeaks: nextVoiceWaveformPeaks,
       });
@@ -543,9 +552,8 @@ export default function HomeScreen() {
 
       return draft;
     } catch (error) {
-      setGenerationError(
-        error instanceof Error ? error.message : '分割カードの作成に失敗しました。'
-      );
+      logBackendError('preparePracticeDraft', error);
+      setGenerationError(formatBackendErrorForDisplay(error, '分割カードの作成に失敗しました。'));
       return null;
     } finally {
       generationInFlightRef.current = false;
@@ -579,13 +587,15 @@ export default function HomeScreen() {
       setDraftCards([]);
       setDiaryDraftText(practice.diaryEntry.plainText);
       setDiaryDraftSource(practice.source);
+      setIsTranscriptEdited(
+        practice.source === 'voice' ? practice.diaryEntry.isTranscriptEdited : false
+      );
       setTranscriptWords(practice.source === 'voice' ? practice.diaryEntry.transcriptWords : []);
       setWaveformPeaks(practice.source === 'voice' ? practice.diaryEntry.waveformPeaks : []);
       notifyPracticeChanged();
     } catch (error) {
-      setGenerationError(
-        error instanceof Error ? error.message : '英語カードの作成に失敗しました。'
-      );
+      logBackendError('completePracticeDraft', error);
+      setGenerationError(formatBackendErrorForDisplay(error, '英語カードの作成に失敗しました。'));
     } finally {
       generationInFlightRef.current = false;
       setIsCompletingPractice(false);
@@ -637,6 +647,7 @@ export default function HomeScreen() {
         rawTranscriptText,
         transcriptWords,
         waveformPeaks,
+        isTranscriptEdited,
         localRecordingId: diaryDraftSource === 'voice' ? pendingLocalRecordingId : null,
       });
       return;
@@ -674,10 +685,13 @@ export default function HomeScreen() {
     if (!hasRawTranscript || !hasNextText) {
       setRawTranscriptText(null);
       setDiaryDraftSource('text');
+      setIsTranscriptEdited(false);
+      setTranscriptWords([]);
       setWaveformPeaks([]);
+    } else {
+      setIsTranscriptEdited(true);
     }
 
-    setTranscriptWords([]);
     setDiaryDraftText(nextText);
     setTranscriptionError(null);
     setGenerationError(null);
@@ -695,6 +709,7 @@ export default function HomeScreen() {
     setEntryMode('write');
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
+    setIsTranscriptEdited(false);
     setTranscriptWords([]);
     setWaveformPeaks([]);
     setTranscriptionError(null);

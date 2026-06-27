@@ -15,6 +15,7 @@ export type PreparePracticeDraftRequest = {
   cleanedText: string;
   clientRequestId: string;
   diaryText: string;
+  isTranscriptEdited: boolean;
   rawTranscriptText: string;
   source: EntrySource;
   transcriptWords: TranscriptWord[];
@@ -78,6 +79,7 @@ export function parsePreparePracticeDraftRequest(value: unknown): ParseResult<Pr
       cleanedText: plainText,
       clientRequestId: clientRequestId.value,
       diaryText: diaryText || plainText,
+      isTranscriptEdited: source === 'voice' && value.isTranscriptEdited === true,
       rawTranscriptText,
       source,
       transcriptWords: source === 'voice' ? normalizeTranscriptWords(value.transcriptWords) : [],

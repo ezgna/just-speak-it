@@ -2,6 +2,7 @@ import { ensureAnonymousSession } from '@/lib/backend/auth';
 import type { TranscriptionWord } from '@/lib/backend/transcription';
 import { normalizeWaveformPeaks } from '@/lib/audio/waveform';
 import { type CardSplitPolicy } from '@/lib/card-split-policy';
+import { UserFacingBackendError } from '@/lib/backend/errors';
 import type { CardLearningProgress, CardLearningStatus } from '@/lib/card-learning-statuses';
 import { requireSupabaseClient } from '@/lib/supabase/client';
 import { type TranslationStyle } from '@/lib/translation-style';
@@ -41,6 +42,7 @@ export type PracticeDiaryEntry = {
   source: 'text' | 'voice';
   originalText: string;
   plainText: string;
+  isTranscriptEdited: boolean;
   bulletPoints: string[];
   transcriptWords: TranscriptionWord[];
   waveformPeaks: number[];
@@ -75,6 +77,7 @@ export type TranslationCardGroup = {
   practiceGenerationId: string;
   source: 'text' | 'voice';
   translationStyle: TranslationStyle;
+  isTranscriptEdited: boolean;
   diaryText: string;
   diaryExcerpt: string;
   createdAt: string;
@@ -104,6 +107,7 @@ export type DiaryEntry = {
   source: 'text' | 'voice';
   originalText: string;
   plainText: string;
+  isTranscriptEdited: boolean;
   bulletPoints: string[];
   waveformPeaks: number[];
   createdAt: string;
@@ -114,6 +118,7 @@ type DiaryEntryRow = {
   source: 'text' | 'voice';
   original_text: string;
   plain_text: string;
+  is_transcript_edited?: boolean;
   bullet_points: unknown;
   transcript_words?: unknown;
   waveform_peaks?: unknown;
@@ -124,6 +129,7 @@ type DiaryEntryGroupRow = {
   id: string;
   source: 'text' | 'voice';
   plain_text: string;
+  is_transcript_edited?: boolean;
   created_at: string;
 };
 
@@ -144,6 +150,7 @@ export type PreparePracticeDraftParams = {
   clientRequestId: string;
   diaryText: string;
   source: 'text' | 'voice';
+  isTranscriptEdited?: boolean;
   rawTranscriptText?: string;
   cleanedText?: string;
   transcriptWords?: TranscriptionWord[];
@@ -155,6 +162,7 @@ type PracticeFunctionDiaryEntry = {
   source: 'text' | 'voice';
   original_text: string;
   plain_text: string;
+  is_transcript_edited?: boolean;
   bullet_points?: unknown;
   transcript_words?: unknown;
   waveform_peaks?: unknown;
@@ -189,6 +197,9 @@ export type CompletePracticeResponse = {
 
 const translationCardSelect =
   'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, learning_status, last_reviewed_at, next_review_at, review_count, success_count, created_at';
+const NoPracticeContentMessage = '英語カードにできる内容が見つかりませんでした。';
+const DraftFailureMessage = '分割カードの作成に失敗しました。';
+const CompleteFailureMessage = '英語カードの作成に失敗しました。';
 const RestorablePracticeGenerationStatuses = ['draft', 'failed', 'translating'] as const;
 const TranslatingGenerationRestoreAfterMs = 10 * 60 * 1000;
 
@@ -197,6 +208,7 @@ export async function preparePracticeDraft({
   clientRequestId,
   diaryText,
   source,
+  isTranscriptEdited,
   rawTranscriptText,
   cleanedText,
   transcriptWords,
@@ -213,6 +225,7 @@ export async function preparePracticeDraft({
         clientRequestId,
         diaryText,
         source,
+        isTranscriptEdited: source === 'voice' ? Boolean(isTranscriptEdited) : false,
         rawTranscriptText,
         cleanedText,
         transcriptWords: source === 'voice' ? transcriptWords ?? [] : [],
@@ -222,11 +235,11 @@ export async function preparePracticeDraft({
   );
 
   if (error) {
-    throw await normalizeFunctionError(error);
+    throw await normalizeFunctionError(error, DraftFailureMessage);
   }
 
   if (!data?.cards?.length) {
-    throw new Error('分割カードを作成できませんでした。');
+    throw new UserFacingBackendError({ userMessage: NoPracticeContentMessage });
   }
 
   return mapPracticeDraftResponse(data);
@@ -250,11 +263,11 @@ export async function completePracticeDraft({
   );
 
   if (error) {
-    throw await normalizeFunctionError(error);
+    throw await normalizeFunctionError(error, CompleteFailureMessage);
   }
 
   if (!data?.cards?.length) {
-    throw new Error('英語カードを作成できませんでした。');
+    throw new UserFacingBackendError({ userMessage: CompleteFailureMessage });
   }
 
   return mapCompletedPracticeResponse(data);
@@ -285,7 +298,7 @@ export async function getLatestPracticeDraft(cardSplitPolicy: CardSplitPolicy) {
 
   const { data: diaryEntry, error: diaryError } = await supabase
     .from('diary_entries')
-    .select('id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, created_at')
+    .select('id, source, original_text, plain_text, is_transcript_edited, bullet_points, transcript_words, waveform_peaks, created_at')
     .eq('id', generation.diary_entry_id)
     .maybeSingle();
 
@@ -421,7 +434,7 @@ export async function listDiaryEntries() {
 
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
-    .select('id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, created_at')
+    .select('id, source, original_text, plain_text, is_transcript_edited, bullet_points, transcript_words, waveform_peaks, created_at')
     .in('id', diaryEntryIds);
 
   if (entriesError) {
@@ -438,6 +451,7 @@ export async function listDiaryEntries() {
       source: entry.source,
       originalText: entry.original_text,
       plainText: normalizeDiaryBodyText(entry.plain_text),
+      isTranscriptEdited: Boolean(entry.is_transcript_edited),
       bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.plain_text),
       waveformPeaks: normalizeWaveformPeaks(entry.waveform_peaks),
       createdAt: entry.created_at,
@@ -471,7 +485,7 @@ export async function listTranslationCardGroups() {
 
   const { data: entries, error: entriesError } = await supabase
     .from('diary_entries')
-    .select('id, source, plain_text, created_at')
+    .select('id, source, plain_text, is_transcript_edited, created_at')
     .in('id', diaryEntryIds);
 
   if (entriesError) {
@@ -528,6 +542,7 @@ export async function listTranslationCardGroups() {
         practiceGenerationId: generation.id,
         source: entry.source,
         translationStyle: generation.translation_style,
+        isTranscriptEdited: Boolean(entry.is_transcript_edited),
         diaryText: normalizeDiaryBodyText(entry.plain_text),
         diaryExcerpt: createDiaryExcerpt(entry.plain_text),
         createdAt: entry.created_at,
@@ -575,27 +590,34 @@ export async function restoreTranslationCardLearningProgress(
   }
 }
 
-async function normalizeFunctionError(error: unknown) {
+async function normalizeFunctionError(error: unknown, fallbackUserMessage: string) {
   const response = isFunctionErrorWithResponse(error) ? error.context : null;
+  let debugMessage: string | null = null;
 
   if (response) {
     const body = await response.text().catch(() => '');
     const parsed = parseJson<{ error?: string }>(body);
 
     if (parsed?.error) {
-      return new Error(parsed.error);
+      debugMessage = parsed.error;
+    } else if (body) {
+      debugMessage = body;
     }
-
-    if (body) {
-      return new Error(body);
-    }
+  } else if (error instanceof Error) {
+    debugMessage = error.message;
+  } else if (typeof error === 'string') {
+    debugMessage = error;
   }
 
-  if (error instanceof Error) {
-    return error;
+  if (debugMessage === NoPracticeContentMessage) {
+    return new UserFacingBackendError({ userMessage: NoPracticeContentMessage });
   }
 
-  return new Error('英語カードの作成に失敗しました。');
+  return new UserFacingBackendError({
+    userMessage: fallbackUserMessage,
+    debugMessage,
+    cause: error,
+  });
 }
 
 function isFunctionErrorWithResponse(error: unknown): error is { context: { text: () => Promise<string> } } {
@@ -678,6 +700,7 @@ function mapPracticeFunctionDiaryEntry(entry: PracticeFunctionDiaryEntry): Pract
     source: entry.source,
     originalText: entry.original_text,
     plainText: normalizeDiaryBodyText(entry.plain_text),
+    isTranscriptEdited: Boolean(entry.is_transcript_edited),
     bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.plain_text),
     transcriptWords: normalizeTranscriptWords(entry.transcript_words),
     waveformPeaks: normalizeWaveformPeaks(entry.waveform_peaks),
@@ -691,6 +714,7 @@ function mapPracticeDiaryEntry(entry: DiaryEntryRow): PracticeDiaryEntry {
     source: entry.source,
     originalText: entry.original_text,
     plainText: normalizeDiaryBodyText(entry.plain_text),
+    isTranscriptEdited: Boolean(entry.is_transcript_edited),
     bulletPoints: normalizeBulletPoints(entry.bullet_points, entry.plain_text),
     transcriptWords: normalizeTranscriptWords(entry.transcript_words),
     waveformPeaks: normalizeWaveformPeaks(entry.waveform_peaks),

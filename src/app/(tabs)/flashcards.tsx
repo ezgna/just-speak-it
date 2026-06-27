@@ -76,7 +76,6 @@ const ReviewColors = {
   bodyText: '#111111',
   mint: '#2FDD6C',
   mutedText: '#5F6670',
-  shadow: '0 12px 0 #D9E7E1',
   surface: '#FFFFFF',
 };
 
@@ -101,7 +100,6 @@ const styles = StyleSheet.create({
     backgroundColor: ReviewColors.surface,
     padding: Spacing.four,
     gap: Spacing.three,
-    boxShadow: ReviewColors.shadow,
   },
   stateTitle: {
     color: ReviewColors.bodyText,

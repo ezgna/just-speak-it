@@ -45,6 +45,7 @@ export type Database = {
           content_hash: string
           created_at: string
           id: string
+          is_transcript_edited: boolean
           original_text: string
           plain_text: string
           source: string
@@ -58,6 +59,7 @@ export type Database = {
           content_hash: string
           created_at?: string
           id?: string
+          is_transcript_edited?: boolean
           original_text: string
           plain_text: string
           source: string
@@ -71,6 +73,7 @@ export type Database = {
           content_hash?: string
           created_at?: string
           id?: string
+          is_transcript_edited?: boolean
           original_text?: string
           plain_text?: string
           source?: string
@@ -268,6 +271,7 @@ export type Database = {
           p_draft_model: string
           p_draft_prompt_version: string
           p_draft_schema_version: string
+          p_is_transcript_edited: boolean
           p_original_text: string
           p_plain_text: string
           p_source: string

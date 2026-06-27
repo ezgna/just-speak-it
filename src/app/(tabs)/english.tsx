@@ -1,4 +1,4 @@
-import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/just-speak-it-ui';
@@ -48,12 +48,26 @@ export default function EnglishScreen() {
 
         {errorMessage && groups.length === 0 && (
           <View style={styles.centerState}>
-            <ThemedText type="title" selectable>
-              英語
-            </ThemedText>
-            <ThemedText style={{ color: palette.coral }} selectable>
-              {errorMessage}
-            </ThemedText>
+            <View style={styles.statePanel}>
+              <ThemedText style={styles.stateTitle} selectable>
+                読み込めませんでした
+              </ThemedText>
+              <ThemedText style={styles.stateText} selectable>
+                {errorMessage}
+              </ThemedText>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isRefreshing}
+                onPress={refreshGroups}
+                style={({ pressed }) => [
+                  styles.retryButton,
+                  { opacity: isRefreshing ? 0.5 : pressed ? 0.74 : 1 },
+                ]}>
+                <ThemedText style={styles.retryButtonText}>
+                  再読み込み
+                </ThemedText>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -107,5 +121,44 @@ const styles = StyleSheet.create({
     minHeight: 360,
     justifyContent: 'center',
     gap: Spacing.three,
+  },
+  statePanel: {
+    width: '100%',
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: '#111111',
+    backgroundColor: '#FFFFFF',
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  stateTitle: {
+    color: '#111111',
+    fontSize: 24,
+    lineHeight: 31,
+    fontWeight: 800,
+  },
+  stateText: {
+    color: '#5F6670',
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: 600,
+  },
+  retryButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    borderCurve: 'continuous',
+    borderWidth: 3,
+    borderColor: '#111111',
+    backgroundColor: '#2FDD6C',
+    paddingHorizontal: Spacing.three,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 22,
+    fontWeight: 800,
   },
 });

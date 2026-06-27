@@ -24,6 +24,7 @@ type DiaryEntryRow = {
   source: 'text' | 'voice';
   original_text: string;
   plain_text: string;
+  is_transcript_edited: boolean;
   bullet_points: unknown;
   transcript_words: unknown;
   waveform_peaks: unknown;
@@ -85,7 +86,7 @@ const translationSchema = {
 };
 
 const diaryEntrySelect =
-  'id, user_id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
+  'id, user_id, source, original_text, plain_text, is_transcript_edited, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
   'id, user_id, diary_entry_id, client_request_id, card_split_policy, translation_style, status, error_message, created_at, updated_at';
 const translationCardSelect =
@@ -376,6 +377,7 @@ function toPublicDiaryEntry(diaryEntry: DiaryEntryRow) {
     source: diaryEntry.source,
     original_text: diaryEntry.original_text,
     plain_text: diaryEntry.plain_text,
+    is_transcript_edited: diaryEntry.is_transcript_edited,
     bullet_points: diaryEntry.bullet_points,
     transcript_words: diaryEntry.transcript_words,
     waveform_peaks: diaryEntry.waveform_peaks,

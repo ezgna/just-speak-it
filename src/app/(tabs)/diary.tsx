@@ -228,11 +228,28 @@ export default function DiaryScreen() {
         )}
 
         {errorMessage && entries.length === 0 && (
-          <DiaryStatePaper>
-            <ThemedText style={[styles.stateText, styles.errorText]} selectable>
-              {errorMessage}
-            </ThemedText>
-          </DiaryStatePaper>
+          <View style={styles.centerState}>
+            <View style={styles.statePanel}>
+              <ThemedText style={styles.stateTitle} selectable>
+                読み込めませんでした
+              </ThemedText>
+              <ThemedText style={styles.stateDescription} selectable>
+                {errorMessage}
+              </ThemedText>
+              <Pressable
+                accessibilityRole="button"
+                disabled={isRefreshing}
+                onPress={refreshEntries}
+                style={({ pressed }) => [
+                  styles.retryButton,
+                  { opacity: isRefreshing ? 0.5 : pressed ? 0.74 : 1 },
+                ]}>
+                <ThemedText style={styles.retryButtonText}>
+                  再読み込み
+                </ThemedText>
+              </Pressable>
+            </View>
+          </View>
         )}
 
         {errorMessage && entries.length > 0 && (
@@ -709,6 +726,10 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     gap: Spacing.three,
   },
+  centerState: {
+    minHeight: 360,
+    justifyContent: 'center',
+  },
   diaryPaperList: {
     gap: Spacing.three,
   },
@@ -914,6 +935,45 @@ const styles = StyleSheet.create({
     color: DiaryColors.bodyText,
     fontSize: 17,
     lineHeight: 28,
+    fontWeight: 800,
+  },
+  statePanel: {
+    width: '100%',
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    borderWidth: 4,
+    borderColor: DiaryColors.bodyText,
+    backgroundColor: '#FFFFFF',
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  stateTitle: {
+    color: DiaryColors.bodyText,
+    fontSize: 24,
+    lineHeight: 31,
+    fontWeight: 800,
+  },
+  stateDescription: {
+    color: '#5F6670',
+    fontSize: 16,
+    lineHeight: 24,
+    fontWeight: 600,
+  },
+  retryButton: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+    borderCurve: 'continuous',
+    borderWidth: 3,
+    borderColor: DiaryColors.bodyText,
+    backgroundColor: '#2FDD6C',
+    paddingHorizontal: Spacing.three,
+  },
+  retryButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: 800,
   },
   errorBanner: {
