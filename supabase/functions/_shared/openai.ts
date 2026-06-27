@@ -13,7 +13,7 @@ export async function createOpenAIJsonResponse<T>({
   input,
   schemaName,
   schema,
-  maxOutputTokens = 1800,
+  maxOutputTokens = 8000,
 }: OpenAIJsonParams): Promise<T> {
   const apiKey = Deno.env.get('OPENAI_API_KEY');
 
@@ -28,7 +28,7 @@ export async function createOpenAIJsonResponse<T>({
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5.4-mini',
+      model: getOpenAITextModel(),
       instructions,
       input,
       max_output_tokens: maxOutputTokens,
@@ -73,6 +73,10 @@ export async function createOpenAIJsonResponse<T>({
         : 'OpenAIのJSON出力が壊れていました。'
     );
   }
+}
+
+export function getOpenAITextModel() {
+  return Deno.env.get('OPENAI_TEXT_MODEL') ?? 'gpt-5.4-mini';
 }
 
 function readOpenAIOutputText(payload: Record<string, unknown>) {

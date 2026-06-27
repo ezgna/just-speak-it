@@ -91,6 +91,7 @@ export default function HomeScreen() {
   const generationInFlightRef = useRef(false);
   const resetDraftOnBlurRef = useRef(false);
   const draftInteractionVersionRef = useRef(0);
+  const draftClientRequestIdRef = useRef<string | null>(null);
   const waveformMeteringSamplesRef = useRef<number[]>([]);
   const currentDraft = activeDraft?.cardSplitPolicy === cardSplitPolicy ? activeDraft : null;
 
@@ -113,6 +114,12 @@ export default function HomeScreen() {
     !isWorking &&
     !currentDraft &&
     completedPracticeCards.length === 0;
+  const isVoiceTranscriptInputEditable =
+    diaryDraftSource === 'voice' &&
+    !recorderState.isRecording &&
+    !isWorking &&
+    !currentDraft &&
+    completedPracticeCards.length === 0;
   const hasDraftText = diaryDraftText.trim().length > 0;
   const hasActiveDraft = Boolean(currentDraft && draftCards.length > 0);
   const hasCompletedPracticeCards = completedPracticeCards.length > 0;
@@ -122,10 +129,15 @@ export default function HomeScreen() {
     hasDraftText &&
     !hasActiveDraft &&
     !hasCompletedPracticeCards;
+  const shouldShowVoiceTranscriptEditor =
+    diaryDraftSource === 'voice' &&
+    hasDraftText &&
+    !hasActiveDraft &&
+    !hasCompletedPracticeCards &&
+    !shouldShowTranscribedPreview;
   const isEntryIdle = !hasActiveDraft && !hasCompletedPracticeCards;
   const isWriteMode = entryMode === 'write';
   const shouldShowSplitAction =
-    isWriteMode &&
     hasDraftText &&
     !hasActiveDraft &&
     !hasCompletedPracticeCards &&
@@ -143,6 +155,10 @@ export default function HomeScreen() {
     hasCompletedPracticeCards ||
     !isWriteMode ||
     (isWriteMode && (hasDraftText || isWritingButtonActive));
+  const shouldDismissKeyboardOnContentTap =
+    (isWriteMode || shouldShowVoiceTranscriptEditor) &&
+    !hasActiveDraft &&
+    !hasCompletedPracticeCards;
 
   const markDraftInteraction = useCallback(() => {
     draftInteractionVersionRef.current += 1;
@@ -162,8 +178,21 @@ export default function HomeScreen() {
     });
   }, []);
 
+  function getDraftClientRequestId() {
+    if (!draftClientRequestIdRef.current) {
+      draftClientRequestIdRef.current = createClientRequestId();
+    }
+
+    return draftClientRequestIdRef.current;
+  }
+
+  function clearDraftClientRequestId() {
+    draftClientRequestIdRef.current = null;
+  }
+
   const resetDraftState = useCallback(() => {
     markDraftInteraction();
+    draftClientRequestIdRef.current = null;
     clearRetryRecordingAction();
     clearPendingLocalRecordingAction();
     setEntryMode('voice');
@@ -180,6 +209,7 @@ export default function HomeScreen() {
   }, [clearPendingLocalRecordingAction, clearRetryRecordingAction, markDraftInteraction]);
 
   const applyPracticeDraft = useCallback((draft: PracticeDraft) => {
+    draftClientRequestIdRef.current = null;
     setActiveDraft(draft);
     setDraftCards(draft.cards);
     setCompletedPracticeCards([]);
@@ -189,7 +219,11 @@ export default function HomeScreen() {
     setTranscriptWords(draft.source === 'voice' ? draft.diaryEntry.transcriptWords : []);
     setWaveformPeaks(draft.source === 'voice' ? draft.diaryEntry.waveformPeaks : []);
     setTranscriptionError(null);
-    setGenerationError(null);
+    setGenerationError(
+      draft.status === 'failed'
+        ? draft.errorMessage ?? '前回の英語カード作成が完了していません。'
+        : null
+    );
   }, []);
 
   useFocusEffect(
@@ -211,7 +245,7 @@ export default function HomeScreen() {
 
     async function restoreLatestDraft() {
       try {
-        const draft = await getLatestPracticeDraft();
+        const draft = await getLatestPracticeDraft(cardSplitPolicy);
 
         if (
           isCancelled ||
@@ -271,6 +305,7 @@ export default function HomeScreen() {
 
   async function startRecording() {
     markDraftInteraction();
+    clearDraftClientRequestId();
     clearRetryRecordingAction();
     clearPendingLocalRecordingAction();
     setEntryMode('voice');
@@ -413,6 +448,7 @@ export default function HomeScreen() {
     try {
       const transcript = await transcribeRecording(recordingUri);
       const cleanedText = transcript.cleanedText.trim();
+      clearDraftClientRequestId();
       setRawTranscriptText(cleanedText ? transcript.rawText : null);
       setTranscriptWords(cleanedText ? transcript.words : []);
       setWaveformPeaks(cleanedText ? normalizedWaveformPeaks : []);
@@ -421,21 +457,9 @@ export default function HomeScreen() {
       setActiveDraft(null);
       setDraftCards([]);
       setCompletedPracticeCards([]);
-      setIsTranscribing(false);
 
       if (localRecordingId) {
         setPendingLocalRecordingId(localRecordingId);
-      }
-
-      if (cleanedText) {
-        await handlePrepareDraft({
-          diaryText: cleanedText,
-          source: 'voice',
-          rawTranscriptText: transcript.rawText,
-          transcriptWords: transcript.words,
-          waveformPeaks: normalizedWaveformPeaks,
-          localRecordingId,
-        });
       }
     } catch (error) {
       const errorMessage =
@@ -493,6 +517,7 @@ export default function HomeScreen() {
     try {
       const draft = await preparePracticeDraft({
         cardSplitPolicy,
+        clientRequestId: getDraftClientRequestId(),
         diaryText: normalizedDiaryText,
         source,
         cleanedText: normalizedDiaryText,
@@ -547,11 +572,8 @@ export default function HomeScreen() {
       const practice = await completePracticeDraft({
         practiceGenerationId: currentDraft.practiceGenerationId,
         translationStyle,
-        cards: draftCards.map((card) => ({
-          id: card.id,
-          japanese: card.japanese,
-        })),
       });
+      clearDraftClientRequestId();
       setCompletedPracticeCards(practice.cards);
       setActiveDraft(null);
       setDraftCards([]);
@@ -644,15 +666,18 @@ export default function HomeScreen() {
 
   function handleDraftTextChange(nextText: string) {
     markDraftInteraction();
+    clearDraftClientRequestId();
     clearRetryRecordingAction();
+    const hasRawTranscript = Boolean(rawTranscriptText);
+    const hasNextText = nextText.trim().length > 0;
 
-    if (!rawTranscriptText || !nextText.trim()) {
+    if (!hasRawTranscript || !hasNextText) {
       setRawTranscriptText(null);
       setDiaryDraftSource('text');
+      setWaveformPeaks([]);
     }
 
     setTranscriptWords([]);
-    setWaveformPeaks([]);
     setDiaryDraftText(nextText);
     setTranscriptionError(null);
     setGenerationError(null);
@@ -663,6 +688,7 @@ export default function HomeScreen() {
 
   function handleEnterWriteMode() {
     markDraftInteraction();
+    clearDraftClientRequestId();
     clearRetryRecordingAction();
     clearPendingLocalRecordingAction();
     Keyboard.dismiss();
@@ -762,6 +788,29 @@ export default function HomeScreen() {
           <GeneratedPracticePreview cards={completedPracticeCards} />
         ) : shouldShowTranscribedPreview ? (
           <TranscribedDiaryPreview text={diaryDraftText} />
+        ) : shouldShowVoiceTranscriptEditor ? (
+          <View style={styles.inputDismissArea}>
+            <GlideTextInput
+              value={diaryDraftText}
+              tone="cream"
+              accentTone="mint"
+              variant="canvas"
+              canvasCornerColor={palette.border}
+              accessibilityLabel="文字起こしされた日記を確認・修正"
+              editable={isVoiceTranscriptInputEditable}
+              placeholder="話した内容"
+              placeholderTextColor={palette.muted}
+              frameStyle={styles.draftInputFrame}
+              inputStyle={[
+                styles.draftInput,
+                {
+                  color: palette.text,
+                  opacity: isVoiceTranscriptInputEditable ? 1 : 0.78,
+                },
+              ]}
+              onChangeText={handleDraftTextChange}
+            />
+          </View>
         ) : isWriteMode ? (
           <View style={styles.inputDismissArea}>
             <GlideTextInput
@@ -879,7 +928,7 @@ export default function HomeScreen() {
       ]}>
       {topActionButton}
 
-      {isWriteMode && !hasActiveDraft && !hasCompletedPracticeCards ? (
+      {shouldDismissKeyboardOnContentTap ? (
         <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
           {contentArea}
         </TouchableWithoutFeedback>
@@ -921,6 +970,10 @@ function formatDuration(durationMillis: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function createClientRequestId() {
+  return globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 async function setRecordingHapticsAllowed(allowed: boolean) {

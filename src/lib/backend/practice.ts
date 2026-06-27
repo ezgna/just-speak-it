@@ -2,6 +2,7 @@ import { ensureAnonymousSession } from '@/lib/backend/auth';
 import type { TranscriptionWord } from '@/lib/backend/transcription';
 import { normalizeWaveformPeaks } from '@/lib/audio/waveform';
 import { type CardSplitPolicy } from '@/lib/card-split-policy';
+import type { CardLearningProgress, CardLearningStatus } from '@/lib/card-learning-statuses';
 import { requireSupabaseClient } from '@/lib/supabase/client';
 import { type TranslationStyle } from '@/lib/translation-style';
 
@@ -15,10 +16,11 @@ export type TranslationCard = {
   sourceWordEndIndex: number | null;
   audioStartSec: number | null;
   audioEndSec: number | null;
+  learningProgress: CardLearningProgress;
   createdAt?: string;
 };
 
-export type PracticeGenerationStatus = 'draft' | 'translating' | 'completed' | 'failed';
+export type PracticeGenerationStatus = 'draft' | 'translating' | 'completed' | 'failed' | 'discarded';
 
 export type PracticeDraftCard = {
   id: string;
@@ -30,6 +32,7 @@ export type PracticeDraftCard = {
   sourceWordEndIndex: number | null;
   audioStartSec: number | null;
   audioEndSec: number | null;
+  learningProgress: CardLearningProgress;
   createdAt?: string;
 };
 
@@ -47,9 +50,10 @@ export type PracticeDiaryEntry = {
 export type PracticeDraft = {
   cardSplitPolicy: CardSplitPolicy;
   diaryEntry: PracticeDiaryEntry;
+  errorMessage?: string;
   practiceGenerationId: string;
   source: 'text' | 'voice';
-  status: 'draft';
+  status: Extract<PracticeGenerationStatus, 'draft' | 'failed' | 'translating'>;
   cards: PracticeDraftCard[];
   createdAt: string;
 };
@@ -78,16 +82,21 @@ export type TranslationCardGroup = {
 };
 
 type TranslationCardRow = {
-  id: string;
-  practice_generation_id: string;
-  sort_order: number;
-  japanese: string;
-  english: string | null;
-  source_word_start_index: number | null;
-  source_word_end_index: number | null;
-  audio_start_sec: number | null;
   audio_end_sec: number | null;
+  audio_start_sec: number | null;
   created_at?: string;
+  english: string | null;
+  id: string;
+  japanese: string;
+  last_reviewed_at: string | null;
+  learning_status: string;
+  next_review_at: string | null;
+  practice_generation_id: string;
+  review_count: number;
+  sort_order: number;
+  source_word_end_index: number | null;
+  source_word_start_index: number | null;
+  success_count: number;
 };
 
 export type DiaryEntry = {
@@ -120,9 +129,11 @@ type DiaryEntryGroupRow = {
 
 type PracticeGenerationRow = {
   card_split_policy: CardSplitPolicy;
+  client_request_id?: string;
+  error_message?: string | null;
   id: string;
   diary_entry_id: string;
-  practice_generation_status?: PracticeGenerationStatus;
+  status?: PracticeGenerationStatus;
   translation_style: TranslationStyle;
   created_at: string;
   updated_at?: string;
@@ -130,6 +141,7 @@ type PracticeGenerationRow = {
 
 export type PreparePracticeDraftParams = {
   cardSplitPolicy?: CardSplitPolicy;
+  clientRequestId: string;
   diaryText: string;
   source: 'text' | 'voice';
   rawTranscriptText?: string;
@@ -153,7 +165,7 @@ type PracticeFunctionGeneration = {
   card_split_policy: CardSplitPolicy;
   id: string;
   diary_entry_id: string;
-  practice_generation_status: PracticeGenerationStatus;
+  status: PracticeGenerationStatus;
   translation_style: TranslationStyle;
   created_at: string;
 };
@@ -167,7 +179,6 @@ export type PreparePracticeDraftResponse = {
 export type CompletePracticeDraftParams = {
   practiceGenerationId: string;
   translationStyle?: TranslationStyle;
-  cards: { id: string; japanese: string }[];
 };
 
 export type CompletePracticeResponse = {
@@ -177,10 +188,13 @@ export type CompletePracticeResponse = {
 };
 
 const translationCardSelect =
-  'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
+  'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, learning_status, last_reviewed_at, next_review_at, review_count, success_count, created_at';
+const RestorablePracticeGenerationStatuses = ['draft', 'failed', 'translating'] as const;
+const TranslatingGenerationRestoreAfterMs = 10 * 60 * 1000;
 
 export async function preparePracticeDraft({
   cardSplitPolicy = 'small_steps',
+  clientRequestId,
   diaryText,
   source,
   rawTranscriptText,
@@ -196,6 +210,7 @@ export async function preparePracticeDraft({
     {
       body: {
         cardSplitPolicy,
+        clientRequestId,
         diaryText,
         source,
         rawTranscriptText,
@@ -220,7 +235,6 @@ export async function preparePracticeDraft({
 export async function completePracticeDraft({
   practiceGenerationId,
   translationStyle = 'native',
-  cards,
 }: CompletePracticeDraftParams) {
   await ensureAnonymousSession();
 
@@ -231,7 +245,6 @@ export async function completePracticeDraft({
       body: {
         practiceGenerationId,
         translationStyle,
-        cards,
       },
     }
   );
@@ -247,22 +260,24 @@ export async function completePracticeDraft({
   return mapCompletedPracticeResponse(data);
 }
 
-export async function getLatestPracticeDraft() {
+export async function getLatestPracticeDraft(cardSplitPolicy: CardSplitPolicy) {
   await ensureAnonymousSession();
 
   const supabase = requireSupabaseClient();
   const { data: generationRows, error: generationError } = await supabase
     .from('practice_generations')
-    .select('id, diary_entry_id, card_split_policy, translation_style, practice_generation_status, created_at, updated_at')
-    .eq('practice_generation_status', 'draft')
+    .select('id, diary_entry_id, client_request_id, card_split_policy, translation_style, status, error_message, created_at, updated_at')
+    .eq('card_split_policy', cardSplitPolicy)
+    .in('status', RestorablePracticeGenerationStatuses)
     .order('updated_at', { ascending: false })
-    .limit(1);
+    .limit(10);
 
   if (generationError) {
     throw generationError;
   }
 
-  const generation = (generationRows?.[0] ?? null) as PracticeGenerationRow | null;
+  const generation =
+    ((generationRows ?? []) as PracticeGenerationRow[]).find(isRestorablePracticeGeneration) ?? null;
 
   if (!generation) {
     return null;
@@ -299,9 +314,10 @@ export async function getLatestPracticeDraft() {
   return {
     cardSplitPolicy: generation.card_split_policy,
     diaryEntry: mapPracticeDiaryEntry(diaryEntry as DiaryEntryRow),
+    errorMessage: generation.error_message ?? undefined,
     practiceGenerationId: generation.id,
     source: (diaryEntry as DiaryEntryRow).source,
-    status: 'draft',
+    status: normalizeRestorablePracticeGenerationStatus(generation.status),
     cards: (cards as TranslationCardRow[]).map(mapPracticeDraftCard),
     createdAt: generation.created_at,
   } satisfies PracticeDraft;
@@ -313,9 +329,9 @@ export async function discardPracticeDraft(practiceGenerationId: string) {
   const supabase = requireSupabaseClient();
   const { data: generation, error: generationError } = await supabase
     .from('practice_generations')
-    .select('id, diary_entry_id, practice_generation_status')
+    .select('id, diary_entry_id, client_request_id, status, updated_at')
     .eq('id', practiceGenerationId)
-    .eq('practice_generation_status', 'draft')
+    .in('status', RestorablePracticeGenerationStatuses)
     .maybeSingle();
 
   if (generationError) {
@@ -326,11 +342,15 @@ export async function discardPracticeDraft(practiceGenerationId: string) {
     return;
   }
 
-  const draftGeneration = generation as { diary_entry_id: string };
-  const { error } = await supabase
-    .from('diary_entries')
-    .delete()
-    .eq('id', draftGeneration.diary_entry_id);
+  const draftGeneration = generation as PracticeGenerationRow;
+
+  if (!isRestorablePracticeGeneration(draftGeneration)) {
+    return;
+  }
+
+  const { error } = await supabase.rpc('discard_practice_generation', {
+    p_generation_id: draftGeneration.id,
+  });
 
   if (error) {
     throw error;
@@ -345,10 +365,6 @@ export async function generatePracticeFromDiary({
   return completePracticeDraft({
     practiceGenerationId: draft.practiceGenerationId,
     translationStyle,
-    cards: draft.cards.map((card) => ({
-      id: card.id,
-      japanese: card.japanese,
-    })),
   });
 }
 
@@ -358,7 +374,7 @@ function mapPracticeDraftResponse(data: PreparePracticeDraftResponse): PracticeD
     diaryEntry: mapPracticeFunctionDiaryEntry(data.diaryEntry),
     practiceGenerationId: data.practiceGeneration.id,
     source: data.diaryEntry.source,
-    status: 'draft',
+    status: normalizeRestorablePracticeGenerationStatus(data.practiceGeneration.status),
     cards: data.cards.map(mapPracticeDraftCard),
     createdAt: data.practiceGeneration.created_at,
   };
@@ -384,7 +400,7 @@ export async function listDiaryEntries() {
   const { data: generationRows, error: generationsError } = await supabase
     .from('practice_generations')
     .select('diary_entry_id, created_at')
-    .eq('practice_generation_status', 'completed')
+    .eq('status', 'completed')
     .order('created_at', { ascending: false });
 
   if (generationsError) {
@@ -435,7 +451,7 @@ export async function listTranslationCardGroups() {
   const { data: generationRows, error: generationsError } = await supabase
     .from('practice_generations')
     .select('id, diary_entry_id, card_split_policy, translation_style, created_at')
-    .eq('practice_generation_status', 'completed')
+    .eq('status', 'completed')
     .order('created_at', { ascending: false });
 
   if (generationsError) {
@@ -476,8 +492,14 @@ export async function listTranslationCardGroups() {
     ((entries ?? []) as DiaryEntryGroupRow[]).map((entry) => [entry.id, entry])
   );
   const cardsByPracticeGenerationId = new Map<string, TranslationCard[]>();
+  const cardCountsByPracticeGenerationId = new Map<string, number>();
 
   for (const card of data ?? []) {
+    const rawCard = card as TranslationCardRow;
+    cardCountsByPracticeGenerationId.set(
+      rawCard.practice_generation_id,
+      (cardCountsByPracticeGenerationId.get(rawCard.practice_generation_id) ?? 0) + 1
+    );
     const mappedCard = mapCompletedTranslationCard(card);
 
     if (!mappedCard) {
@@ -494,8 +516,9 @@ export async function listTranslationCardGroups() {
     .map((generation) => {
       const entry = diaryEntriesById.get(generation.diary_entry_id);
       const cards = cardsByPracticeGenerationId.get(generation.id) ?? [];
+      const cardCount = cardCountsByPracticeGenerationId.get(generation.id) ?? 0;
 
-      if (!entry || cards.length === 0) {
+      if (!entry || cards.length === 0 || cards.length !== cardCount) {
         return null;
       }
 
@@ -512,6 +535,44 @@ export async function listTranslationCardGroups() {
       };
     })
     .filter((group): group is TranslationCardGroup => group !== null);
+}
+
+export async function setTranslationCardLearningStatus(
+  cardId: string,
+  status: CardLearningStatus
+) {
+  await ensureAnonymousSession();
+
+  const supabase = requireSupabaseClient();
+  const { error } = await supabase.rpc('set_translation_card_learning_status', {
+    p_card_id: cardId,
+    p_learning_status: status,
+  });
+
+  if (error) {
+    throw error;
+  }
+}
+
+export async function restoreTranslationCardLearningProgress(
+  cardId: string,
+  progress: CardLearningProgress
+) {
+  await ensureAnonymousSession();
+
+  const supabase = requireSupabaseClient();
+  const { error } = await (supabase.rpc as any)('restore_translation_card_learning_progress', {
+    p_card_id: cardId,
+    p_last_reviewed_at: progress.lastReviewedAt ?? null,
+    p_learning_status: progress.status,
+    p_next_review_at: progress.nextReviewAt ?? null,
+    p_review_count: progress.reviewCount,
+    p_success_count: progress.successCount,
+  });
+
+  if (error) {
+    throw error;
+  }
 }
 
 async function normalizeFunctionError(error: unknown) {
@@ -568,6 +629,7 @@ function mapTranslationCard(card: TranslationCardRow): TranslationCard {
     sourceWordEndIndex: card.source_word_end_index,
     audioStartSec: card.audio_start_sec,
     audioEndSec: card.audio_end_sec,
+    learningProgress: mapCardLearningProgress(card),
     createdAt: card.created_at,
   };
 }
@@ -589,6 +651,7 @@ function mapCompletedTranslationCard(card: TranslationCardRow): TranslationCard 
     sourceWordEndIndex: card.source_word_end_index,
     audioStartSec: card.audio_start_sec,
     audioEndSec: card.audio_end_sec,
+    learningProgress: mapCardLearningProgress(card),
     createdAt: card.created_at,
   };
 }
@@ -604,6 +667,7 @@ function mapPracticeDraftCard(card: TranslationCardRow): PracticeDraftCard {
     sourceWordEndIndex: card.source_word_end_index,
     audioStartSec: card.audio_start_sec,
     audioEndSec: card.audio_end_sec,
+    learningProgress: mapCardLearningProgress(card),
     createdAt: card.created_at,
   };
 }
@@ -656,6 +720,50 @@ function normalizeTranscriptWords(value: unknown): TranscriptionWord[] {
       end: word.end,
     };
   });
+}
+
+function isRestorablePracticeGeneration(generation: PracticeGenerationRow) {
+  const status = generation.status;
+
+  if (status === 'draft' || status === 'failed') {
+    return true;
+  }
+
+  if (status !== 'translating' || !generation.updated_at) {
+    return false;
+  }
+
+  const updatedAt = Date.parse(generation.updated_at);
+
+  if (!Number.isFinite(updatedAt)) {
+    return false;
+  }
+
+  return Date.now() - updatedAt >= TranslatingGenerationRestoreAfterMs;
+}
+
+function normalizeRestorablePracticeGenerationStatus(
+  status: PracticeGenerationStatus | undefined
+): PracticeDraft['status'] {
+  if (status === 'failed' || status === 'translating') {
+    return status;
+  }
+
+  return 'draft';
+}
+
+function mapCardLearningProgress(card: TranslationCardRow): CardLearningProgress {
+  return {
+    status: isCardLearningStatus(card.learning_status) ? card.learning_status : 'new',
+    lastReviewedAt: card.last_reviewed_at ?? undefined,
+    nextReviewAt: card.next_review_at ?? undefined,
+    reviewCount: Math.max(0, card.review_count ?? 0),
+    successCount: Math.max(0, card.success_count ?? 0),
+  };
+}
+
+function isCardLearningStatus(value: unknown): value is CardLearningStatus {
+  return value === 'new' || value === 'learning' || value === 'known';
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

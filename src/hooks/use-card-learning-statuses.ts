@@ -1,62 +1,66 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import {
-  loadCardLearningStatuses,
-  restoreCardLearningProgress,
-  setCardLearningStatus,
-  subscribeToCardLearningStatuses,
+  restoreTranslationCardLearningProgress,
+  setTranslationCardLearningStatus,
+} from '@/lib/backend/practice';
+import {
+  createReviewedCardProgress,
   type CardLearningProgress,
   type CardLearningProgresses,
   type CardLearningStatus,
 } from '@/lib/card-learning-statuses';
 
-export function useCardLearningStatuses() {
-  const [cardStatuses, setCardStatuses] = useState<CardLearningProgresses>({});
-  const [hasLoadedCardStatuses, setHasLoadedCardStatuses] = useState(false);
+export function useCardLearningStatuses(initialStatuses: CardLearningProgresses = {}) {
+  const [overriddenStatuses, setOverriddenStatuses] = useState<CardLearningProgresses>({});
+  const cardStatuses = useMemo(
+    () => ({
+      ...initialStatuses,
+      ...overriddenStatuses,
+    }),
+    [initialStatuses, overriddenStatuses]
+  );
 
-  useEffect(() => {
-    let isCancelled = false;
+  const setCardStatus = useCallback(
+    (cardId: string, status: CardLearningStatus) => {
+      setOverriddenStatuses((currentStatuses) => ({
+        ...currentStatuses,
+        [cardId]: createReviewedCardProgress(
+          currentStatuses[cardId] ?? initialStatuses[cardId],
+          status
+        ),
+      }));
 
-    const unsubscribe = subscribeToCardLearningStatuses((nextStatuses) => {
-      if (!isCancelled) {
-        setCardStatuses(nextStatuses);
-        setHasLoadedCardStatuses(true);
-      }
-    });
+      void setTranslationCardLearningStatus(cardId, status).catch(() => {});
+    },
+    [initialStatuses]
+  );
 
-    loadCardLearningStatuses()
-      .then((nextStatuses) => {
-        if (!isCancelled) {
-          setCardStatuses(nextStatuses);
-          setHasLoadedCardStatuses(true);
+  const restoreCardProgress = useCallback(
+    (cardId: string, progress: CardLearningProgress | undefined) => {
+      setOverriddenStatuses((currentStatuses) => {
+        if (progress) {
+          return {
+            ...currentStatuses,
+            [cardId]: progress,
+          };
         }
-      })
-      .catch(() => {
-        if (!isCancelled) {
-          setHasLoadedCardStatuses(true);
-        }
+
+        const nextStatuses = { ...currentStatuses };
+        delete nextStatuses[cardId];
+        return nextStatuses;
       });
 
-    return () => {
-      isCancelled = true;
-      unsubscribe();
-    };
-  }, []);
-
-  const setCardStatus = useCallback((cardId: string, status: CardLearningStatus) => {
-    void setCardLearningStatus(cardId, status).catch(() => {});
-  }, []);
-
-  const restoreCardProgress = useCallback((
-    cardId: string,
-    progress: CardLearningProgress | undefined
-  ) => {
-    void restoreCardLearningProgress(cardId, progress).catch(() => {});
-  }, []);
+      if (progress) {
+        void restoreTranslationCardLearningProgress(cardId, progress).catch(() => {});
+      }
+    },
+    []
+  );
 
   return {
     cardStatuses,
-    hasLoadedCardStatuses,
+    hasLoadedCardStatuses: true,
     restoreCardProgress,
     setCardStatus,
   };

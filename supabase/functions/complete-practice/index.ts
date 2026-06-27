@@ -1,14 +1,13 @@
 import { errorResponse, getAuthenticatedContext, jsonResponse, optionsResponse } from '../_shared/http.ts';
-import { createOpenAIJsonResponse } from '../_shared/openai.ts';
-
-type CardSplitPolicy = 'meaning_unit' | 'small_steps';
-type TranslationStyle = 'native' | 'simple';
-type PracticeGenerationStatus = 'draft' | 'translating' | 'completed' | 'failed';
-
-type CompletePracticeCardInput = {
-  id: string;
-  japanese: string;
-};
+import { createOpenAIJsonResponse, getOpenAITextModel } from '../_shared/openai.ts';
+import {
+  TranslationPromptVersion,
+  TranslationSchemaVersion,
+  parseCompletePracticeRequest,
+  type CardSplitPolicy,
+  type PracticeGenerationStatus,
+  type TranslationStyle,
+} from '../_shared/practice-contract.ts';
 
 type TranslationOutputCard = {
   id: string;
@@ -35,27 +34,33 @@ type DiaryEntryRow = {
 
 type PracticeGenerationRow = {
   card_split_policy: CardSplitPolicy;
-  id: string;
-  user_id: string;
+  client_request_id: string;
   diary_entry_id: string;
-  practice_generation_status: PracticeGenerationStatus;
-  practice_generation_error: string | null;
+  error_message: string | null;
+  id: string;
+  status: PracticeGenerationStatus;
   translation_style: TranslationStyle;
+  user_id: string;
   created_at: string;
   updated_at: string;
 };
 
 type TranslationCardRow = {
-  id: string;
-  practice_generation_id: string;
-  sort_order: number;
-  japanese: string;
-  english: string | null;
-  source_word_start_index: number | null;
-  source_word_end_index: number | null;
-  audio_start_sec: number | null;
   audio_end_sec: number | null;
+  audio_start_sec: number | null;
   created_at?: string;
+  english: string | null;
+  id: string;
+  japanese: string;
+  last_reviewed_at: string | null;
+  learning_status: 'new' | 'learning' | 'known';
+  next_review_at: string | null;
+  practice_generation_id: string;
+  review_count: number;
+  sort_order: number;
+  source_word_end_index: number | null;
+  source_word_start_index: number | null;
+  success_count: number;
 };
 
 const translationSchema = {
@@ -82,9 +87,9 @@ const translationSchema = {
 const diaryEntrySelect =
   'id, user_id, source, original_text, plain_text, bullet_points, transcript_words, waveform_peaks, content_hash, created_at, updated_at';
 const practiceGenerationSelect =
-  'id, user_id, diary_entry_id, card_split_policy, translation_style, practice_generation_status, practice_generation_error, created_at, updated_at';
+  'id, user_id, diary_entry_id, client_request_id, card_split_policy, translation_style, status, error_message, created_at, updated_at';
 const translationCardSelect =
-  'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, created_at';
+  'id, practice_generation_id, sort_order, japanese, english, source_word_start_index, source_word_end_index, audio_start_sec, audio_end_sec, learning_status, last_reviewed_at, next_review_at, review_count, success_count, created_at';
 
 export default {
   async fetch(req: Request) {
@@ -102,185 +107,144 @@ export default {
       return response;
     }
 
-    const body = await req.json().catch(() => null);
-    const practiceGenerationId =
-      typeof body?.practiceGenerationId === 'string' ? body.practiceGenerationId.trim() : '';
-    const translationStyle = parseTranslationStyle(body?.translationStyle);
-    const cardInputs = parseCardInputs(body?.cards);
+    const parsedRequest = parseCompletePracticeRequest(await req.json().catch(() => null));
 
-    if (!practiceGenerationId) {
-      return errorResponse('practiceGenerationIdが必要です。');
+    if (parsedRequest.type === 'error') {
+      return errorResponse(parsedRequest.message);
     }
 
-    if (cardInputs.length === 0) {
-      return errorResponse('英訳するカードが必要です。');
-    }
-
+    const request = parsedRequest.value;
     const supabase = context.supabase as any;
-    const { data: practiceGeneration, error: generationFetchError } = await supabase
-      .from('practice_generations')
-      .select(practiceGenerationSelect)
-      .eq('id', practiceGenerationId)
-      .eq('user_id', userId)
-      .maybeSingle();
+    const generationResult = await fetchPracticeGeneration({ supabase }, userId, request.practiceGenerationId);
 
-    if (generationFetchError) {
-      return errorResponse(generationFetchError.message, 500);
+    if (generationResult.type === 'error') {
+      return errorResponse(generationResult.message, 500);
     }
 
-    if (!practiceGeneration) {
+    if (generationResult.type !== 'generation') {
       return errorResponse('分割下書きを確認できませんでした。', 404);
     }
 
-    const generation = practiceGeneration as PracticeGenerationRow;
-
-    if (generation.practice_generation_status === 'completed') {
-      return await returnCompletedPractice({ supabase }, generation);
+    if (generationResult.generation.status === 'completed') {
+      return await returnCompletedPractice({ supabase }, generationResult.generation);
     }
 
-    if (generation.practice_generation_status !== 'draft') {
-      return errorResponse('この下書きは英訳できる状態ではありません。', 409);
+    if (generationResult.generation.status === 'discarded') {
+      return errorResponse('この下書きは破棄されています。', 409);
     }
 
-    const existingCardsResult = await fetchPracticeGenerationCards({ supabase }, generation.id);
-
-    if (existingCardsResult.type === 'error') {
-      return errorResponse(existingCardsResult.message, 500);
-    }
-
-    const orderedCards = mergeEditedCards(existingCardsResult.cards, cardInputs);
-
-    if (orderedCards.type === 'error') {
-      return errorResponse(orderedCards.message);
-    }
-
-    const { data: claimedGeneration, error: claimError } = await supabase
-      .from('practice_generations')
-      .update({
-        practice_generation_status: 'translating',
-        practice_generation_error: null,
-        translation_style: translationStyle,
-      })
-      .eq('id', generation.id)
-      .eq('practice_generation_status', 'draft')
-      .select(practiceGenerationSelect)
-      .maybeSingle();
+    const { data: claimed, error: claimError } = await supabase.rpc('claim_practice_generation', {
+      p_generation_id: request.practiceGenerationId,
+      p_translation_model: getOpenAITextModel(),
+      p_translation_prompt_version: TranslationPromptVersion,
+      p_translation_schema_version: TranslationSchemaVersion,
+      p_translation_style: request.translationStyle,
+    });
 
     if (claimError) {
       return errorResponse(claimError.message, 500);
     }
 
-    if (!claimedGeneration) {
-      return errorResponse('この下書きはすでに処理中です。', 409);
+    if (!claimed) {
+      const currentGeneration = await fetchPracticeGeneration(
+        { supabase },
+        userId,
+        request.practiceGenerationId
+      );
+
+      if (currentGeneration.type === 'generation' && currentGeneration.generation.status === 'completed') {
+        return await returnCompletedPractice({ supabase }, currentGeneration.generation);
+      }
+
+      return errorResponse('この下書きは英訳できる状態ではありません。', 409);
+    }
+
+    const cardsResult = await fetchPracticeGenerationCards({ supabase }, request.practiceGenerationId);
+
+    if (cardsResult.type === 'error') {
+      await markGenerationFailed({ supabase }, request.practiceGenerationId, cardsResult.message);
+      return errorResponse(cardsResult.message, 500);
+    }
+
+    const cards = cardsResult.cards;
+
+    if (cards.length === 0) {
+      await markGenerationFailed({ supabase }, request.practiceGenerationId, '英訳するカードが必要です。');
+      return errorResponse('英訳するカードが必要です。', 400);
     }
 
     let output: CompletePracticeOutput;
 
     try {
       output = await createOpenAIJsonResponse<CompletePracticeOutput>({
-        schemaName: 'daily_to_english_completed_practice',
+        schemaName: TranslationSchemaVersion,
         schema: translationSchema,
-        instructions: createTranslationInstructions(translationStyle),
+        instructions: createTranslationInstructions(request.translationStyle),
         input: JSON.stringify({
-          cards: orderedCards.cards.map((card) => ({
+          cards: cards.map((card) => ({
             id: card.id,
             japanese: card.japanese,
           })),
         }),
-        maxOutputTokens: 4200,
+        maxOutputTokens: 12000,
       });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : '英語カードの生成に失敗しました。';
-      await markGenerationFailed({ supabase }, generation.id, message);
+      await markGenerationFailed({ supabase }, request.practiceGenerationId, message);
       return errorResponse(message, 502);
     }
 
-    const translations = validateTranslations(orderedCards.cards, output.cards);
+    const translations = validateTranslations(cards, output.cards);
 
     if (translations.type === 'error') {
-      await markGenerationFailed({ supabase }, generation.id, translations.message);
+      await markGenerationFailed({ supabase }, request.practiceGenerationId, translations.message);
       return errorResponse(translations.message, 502);
     }
 
-    for (const card of orderedCards.cards) {
-      const english = translations.byId.get(card.id);
+    const { error: completeError } = await supabase.rpc('complete_practice_generation', {
+      p_generation_id: request.practiceGenerationId,
+      p_translations: translations.cards,
+    });
 
-      if (!english) {
-        await markGenerationFailed({ supabase }, generation.id, '英語カードの生成結果が不足しています。');
-        return errorResponse('英語カードの生成結果が不足しています。', 502);
-      }
-
-      const { error: updateError } = await supabase
-        .from('translation_cards')
-        .update({
-          japanese: card.japanese,
-          english,
-          ...(card.shouldClearTimestamp
-            ? {
-                source_word_start_index: null,
-                source_word_end_index: null,
-                audio_start_sec: null,
-                audio_end_sec: null,
-              }
-            : {}),
-        })
-        .eq('id', card.id)
-        .eq('practice_generation_id', generation.id);
-
-      if (updateError) {
-        await markGenerationFailed({ supabase }, generation.id, updateError.message);
-        return errorResponse(updateError.message, 500);
-      }
+    if (completeError) {
+      await markGenerationFailed({ supabase }, request.practiceGenerationId, completeError.message);
+      return errorResponse(completeError.message, 500);
     }
 
-    const { data: completedGeneration, error: completeError } = await supabase
-      .from('practice_generations')
-      .update({
-        practice_generation_status: 'completed',
-        practice_generation_error: null,
-      })
-      .eq('id', generation.id)
-      .select(practiceGenerationSelect)
-      .single();
+    const completedGeneration = await fetchPracticeGeneration({ supabase }, userId, request.practiceGenerationId);
 
-    if (completeError || !completedGeneration) {
-      await markGenerationFailed(
-        { supabase },
-        generation.id,
-        completeError?.message ?? '英語カードを完了状態にできませんでした。'
-      );
-      return errorResponse(completeError?.message ?? '英語カードを完了状態にできませんでした。', 500);
+    if (completedGeneration.type === 'error') {
+      return errorResponse(completedGeneration.message, 500);
     }
 
-    return await returnCompletedPractice({ supabase }, completedGeneration as PracticeGenerationRow);
+    if (completedGeneration.type !== 'generation') {
+      return errorResponse('英語カードを完了状態にできませんでした。', 500);
+    }
+
+    return await returnCompletedPractice({ supabase }, completedGeneration.generation);
   },
 };
 
-function parseCardInputs(value: unknown): CompletePracticeCardInput[] {
-  if (!Array.isArray(value)) {
-    return [];
+async function fetchPracticeGeneration(
+  context: { supabase: any },
+  userId: string,
+  practiceGenerationId: string
+) {
+  const { data, error } = await context.supabase
+    .from('practice_generations')
+    .select(practiceGenerationSelect)
+    .eq('id', practiceGenerationId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    return { type: 'error' as const, message: error.message };
   }
 
-  return value
-    .map((card) => {
-      if (
-        typeof card === 'object' &&
-        card !== null &&
-        'id' in card &&
-        'japanese' in card &&
-        typeof card.id === 'string' &&
-        typeof card.japanese === 'string'
-      ) {
-        return {
-          id: card.id.trim(),
-          japanese: card.japanese.trim(),
-        };
-      }
-
-      return null;
-    })
-    .filter((card): card is CompletePracticeCardInput => Boolean(card?.id && card.japanese));
+  return data
+    ? { type: 'generation' as const, generation: data as PracticeGenerationRow }
+    : { type: 'missing' as const };
 }
 
 async function fetchPracticeGenerationCards(
@@ -298,51 +262,6 @@ async function fetchPracticeGenerationCards(
   }
 
   return { type: 'cards' as const, cards: (data ?? []) as TranslationCardRow[] };
-}
-
-function mergeEditedCards(
-  existingCards: TranslationCardRow[],
-  inputCards: CompletePracticeCardInput[]
-) {
-  if (existingCards.length === 0) {
-    return { type: 'error' as const, message: '分割カードを確認できませんでした。' };
-  }
-
-  if (existingCards.length !== inputCards.length) {
-    return { type: 'error' as const, message: 'カードの枚数は変更できません。' };
-  }
-
-  const inputById = new Map(inputCards.map((card) => [card.id, card]));
-  const cards = existingCards.map((card) => {
-    const input = inputById.get(card.id);
-
-    if (!input) {
-      return null;
-    }
-
-    return {
-      id: card.id,
-      practice_generation_id: card.practice_generation_id,
-      sort_order: card.sort_order,
-      japanese: input.japanese,
-      shouldClearTimestamp: input.japanese !== card.japanese,
-    };
-  });
-
-  if (cards.some((card) => card === null)) {
-    return { type: 'error' as const, message: 'カードの並びは変更できません。' };
-  }
-
-  return {
-    type: 'cards' as const,
-    cards: cards as {
-      id: string;
-      practice_generation_id: string;
-      sort_order: number;
-      japanese: string;
-      shouldClearTimestamp: boolean;
-    }[],
-  };
 }
 
 function validateTranslations(
@@ -367,11 +286,13 @@ function validateTranslations(
     return { type: 'error' as const, message: '英語カードの生成結果が不足しています。' };
   }
 
-  return { type: 'translations' as const, byId };
-}
-
-function parseTranslationStyle(value: unknown): TranslationStyle {
-  return value === 'simple' ? 'simple' : 'native';
+  return {
+    type: 'translations' as const,
+    cards: sourceCards.map((card) => ({
+      id: card.id,
+      english: byId.get(card.id) ?? '',
+    })),
+  };
 }
 
 async function returnCompletedPractice(
@@ -398,7 +319,7 @@ async function returnCompletedPractice(
     (card) => typeof card.english === 'string' && card.english.trim().length > 0
   );
 
-  if (completedCards.length === 0) {
+  if (completedCards.length === 0 || completedCards.length !== cards.cards.length) {
     return errorResponse('英語カードを確認できませんでした。', 500);
   }
 
@@ -414,13 +335,10 @@ async function markGenerationFailed(
   practiceGenerationId: string,
   message: string
 ) {
-  await context.supabase
-    .from('practice_generations')
-    .update({
-      practice_generation_status: 'failed',
-      practice_generation_error: message,
-    })
-    .eq('id', practiceGenerationId);
+  await context.supabase.rpc('fail_practice_generation', {
+    p_error_message: message,
+    p_generation_id: practiceGenerationId,
+  });
 }
 
 function createTranslationInstructions(translationStyle: TranslationStyle) {
@@ -431,6 +349,7 @@ function createTranslationInstructions(translationStyle: TranslationStyle) {
     '必ず入力と同じidを、同じカード境界のまま返してください。',
     'english は直訳や教材っぽい説明文にせず、日常会話で自然に言える一文にしてください。',
     'japanese の意味、出来事、感情、温度感を保ってください。事実や理由を新しく足さないでください。',
+    '差別的、攻撃的、露骨、乱暴、断定的、価値判断を含む表現でも、それが japanese の意味なら検閲、省略、伏せ字、婉曲化、道徳的な修正をしないでください。',
     '文の断片ではなく、それぞれ単独で自然に言える英語文にしてください。',
   ];
 
@@ -469,7 +388,7 @@ function toPublicPracticeGeneration(practiceGeneration: PracticeGenerationRow) {
     card_split_policy: practiceGeneration.card_split_policy,
     id: practiceGeneration.id,
     diary_entry_id: practiceGeneration.diary_entry_id,
-    practice_generation_status: practiceGeneration.practice_generation_status,
+    status: practiceGeneration.status,
     translation_style: practiceGeneration.translation_style,
     created_at: practiceGeneration.created_at,
   };

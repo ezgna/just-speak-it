@@ -1,5 +1,6 @@
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -11,17 +12,38 @@ import {
   useResolvedColorScheme,
 } from '@/hooks/use-theme-preference';
 import { TranslationStyleProvider } from '@/hooks/use-translation-style';
+import { ensureBackendSchemaGeneration } from '@/lib/backend/schema-generation';
 
 export default function TabLayout() {
+  const [isBackendSchemaReady, setIsBackendSchemaReady] = useState(false);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    ensureBackendSchemaGeneration()
+      .catch(() => undefined)
+      .finally(() => {
+        if (!isCancelled) {
+          setIsBackendSchemaReady(true);
+        }
+      });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
   return (
     <GestureHandlerRootView style={styles.root}>
-      <ThemePreferenceProvider>
-        <CardSplitPolicyProvider>
-          <TranslationStyleProvider>
-            <RootNavigator />
-          </TranslationStyleProvider>
-        </CardSplitPolicyProvider>
-      </ThemePreferenceProvider>
+      {isBackendSchemaReady && (
+        <ThemePreferenceProvider>
+          <CardSplitPolicyProvider>
+            <TranslationStyleProvider>
+              <RootNavigator />
+            </TranslationStyleProvider>
+          </CardSplitPolicyProvider>
+        </ThemePreferenceProvider>
+      )}
     </GestureHandlerRootView>
   );
 }

@@ -36,7 +36,7 @@ type DiaryDisplayMode = 'original' | 'plain' | 'bullets';
 
 const DiaryDisplayModeOptions: { label: string; value: DiaryDisplayMode }[] = [
   { label: '原文', value: 'original' },
-  { label: 'そのまま', value: 'plain' },
+  { label: '本文', value: 'plain' },
   { label: '箇条書き', value: 'bullets' },
 ];
 

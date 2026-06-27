@@ -32,9 +32,11 @@ import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constan
 import { useCardLearningStatuses } from '@/hooks/use-card-learning-statuses';
 import type { TranslationCardGroup } from '@/lib/backend/practice';
 import {
+  getCardProgress,
   getCardStatus,
   isCardDue,
   type CardLearningProgress,
+  type CardLearningProgresses,
   type CardLearningStatus,
 } from '@/lib/card-learning-statuses';
 import {
@@ -94,7 +96,6 @@ const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabProps) {
   const { width, height } = useWindowDimensions();
   const palette = useDailyPalette();
-  const { cardStatuses, restoreCardProgress, setCardStatus } = useCardLearningStatuses();
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const promotionProgress = useSharedValue(0);
@@ -129,6 +130,14 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   };
 
   const cards = useMemo(() => flattenTranslationCardGroups(groups), [groups]);
+  const initialCardStatuses = useMemo<CardLearningProgresses>(() => {
+    return cards.reduce<CardLearningProgresses>((nextStatuses, card) => {
+      nextStatuses[card.id] = card.learningProgress;
+      return nextStatuses;
+    }, {});
+  }, [cards]);
+  const { cardStatuses, restoreCardProgress, setCardStatus } =
+    useCardLearningStatuses(initialCardStatuses);
   const cardsById = useMemo(() => {
     return new Map(cards.map((card) => [card.id, card]));
   }, [cards]);
@@ -306,7 +315,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
           {
             cardId: activeCard.id,
             card: activeCard,
-            previousProgress: cardStatuses[activeCard.id],
+            previousProgress: getCardProgress(cardStatuses, activeCard.id),
           },
         ]);
         setPendingDismissals((currentDismissals) => ({
@@ -881,7 +890,20 @@ const SlackCardFace = memo(function SlackCardFace({
     void Speech.stop();
     setIsSpeaking(false);
   }, []);
-  const tapGesture = useMemo(
+  const backgroundTapGesture = useMemo(
+    () =>
+      Gesture.Tap()
+        .enabled(!isPreview && typeof onToggleAnswer === 'function')
+        .maxDistance(8)
+        .maxDuration(260)
+        .onEnd((_event, success) => {
+          if (success && onToggleAnswer) {
+            runOnJS(onToggleAnswer)();
+          }
+        }),
+    [isPreview, onToggleAnswer]
+  );
+  const contentTapGesture = useMemo(
     () =>
       Gesture.Tap()
         .enabled(!isPreview && typeof onToggleAnswer === 'function')
@@ -897,67 +919,73 @@ const SlackCardFace = memo(function SlackCardFace({
 
   return (
     <View style={styles.cardFace}>
-      <View style={styles.cardContent}>
-        <GestureDetector gesture={tapGesture}>
-          <View
-            accessible={!isPreview}
-            accessibilityRole="button"
-            accessibilityLabel={flipAccessibilityLabel}
-            onAccessibilityTap={onToggleAnswer}
-            style={[
-              styles.answerTouchArea,
-              isAnswerVisible ? styles.answerTouchAreaWithSoundControls : null,
-            ]}>
-            <ThemedText
-              style={cardBodyTextStyle}
-              adjustsFontSizeToFit
-              minimumFontScale={0.88}
-              numberOfLines={cardBodyMaxLines}
-              selectable>
-              {cardBodyText}
-            </ThemedText>
-          </View>
-        </GestureDetector>
+      <GestureDetector gesture={backgroundTapGesture}>
+        <View collapsable={false} style={styles.cardFlipTapBackground} />
+      </GestureDetector>
 
-        {!isPreview && isAnswerVisible ? (
-          <View style={styles.answerSoundRow}>
-            <LocalRecordingPlayButton
-              diaryEntryId={card.diaryEntryId}
-              audioStartSec={card.audioStartSec}
-              audioEndSec={card.audioEndSec}
-              size={AnswerSoundControlSize}
-              iconSize={18}
-              backgroundColor={LabColors.cardTint}
-              activeBackgroundColor={LabColors.mint}
-              borderColor={LabColors.bodyText}
-              tintColor={LabColors.text}
-              activeTintColor={LabColors.bodyText}
-              onPlayStart={handleLocalRecordingPlayStart}
-            />
-            <Pressable
+      <View pointerEvents="box-none" style={styles.cardContent}>
+        <View pointerEvents="box-none" style={styles.cardContentSurface}>
+          <GestureDetector gesture={contentTapGesture}>
+            <View
+              accessible={!isPreview}
               accessibilityRole="button"
-              accessibilityLabel="英語を読み上げる"
-              hitSlop={8}
-              onPress={handleSpeakPress}
-              style={({ pressed }) => [
-                styles.soundButton,
-                {
-                  backgroundColor: isSpeaking ? LabColors.mint : LabColors.cardTint,
-                  opacity: pressed ? 0.72 : 1,
-                },
+              accessibilityLabel={flipAccessibilityLabel}
+              onAccessibilityTap={onToggleAnswer}
+              style={[
+                styles.answerTouchArea,
+                isAnswerVisible ? styles.answerTouchAreaWithSoundControls : null,
               ]}>
-              <SymbolView
-                name={{
-                  ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
-                  android: 'volume_up',
-                  web: 'volume_up',
-                }}
-                size={18}
+              <ThemedText
+                style={cardBodyTextStyle}
+                adjustsFontSizeToFit
+                minimumFontScale={0.88}
+                numberOfLines={cardBodyMaxLines}
+                selectable>
+                {cardBodyText}
+              </ThemedText>
+            </View>
+          </GestureDetector>
+
+          {!isPreview && isAnswerVisible ? (
+            <View pointerEvents="box-none" style={styles.answerSoundRow}>
+              <LocalRecordingPlayButton
+                diaryEntryId={card.diaryEntryId}
+                audioStartSec={card.audioStartSec}
+                audioEndSec={card.audioEndSec}
+                size={AnswerSoundControlSize}
+                iconSize={18}
+                backgroundColor={LabColors.cardTint}
+                activeBackgroundColor={LabColors.mint}
+                borderColor={LabColors.bodyText}
                 tintColor={LabColors.text}
+                activeTintColor={LabColors.bodyText}
+                onPlayStart={handleLocalRecordingPlayStart}
               />
-            </Pressable>
-          </View>
-        ) : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="英語を読み上げる"
+                hitSlop={8}
+                onPress={handleSpeakPress}
+                style={({ pressed }) => [
+                  styles.soundButton,
+                  {
+                    backgroundColor: isSpeaking ? LabColors.mint : LabColors.cardTint,
+                    opacity: pressed ? 0.72 : 1,
+                  },
+                ]}>
+                <SymbolView
+                  name={{
+                    ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
+                    android: 'volume_up',
+                    web: 'volume_up',
+                  }}
+                  size={18}
+                  tintColor={LabColors.text}
+                />
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
       </View>
     </View>
   );
@@ -1219,7 +1247,6 @@ const LabColors = {
   mintSoft: '#E9F7EE',
   ringTrack: 'rgba(17, 17, 17, 0.16)',
   readOverlay: '#2FDD6C',
-  shadow: '0 12px 0 #D9E7E1',
 };
 
 const styles = StyleSheet.create({
@@ -1306,6 +1333,7 @@ const styles = StyleSheet.create({
   },
   cardFace: {
     flex: 1,
+    position: 'relative',
     backgroundColor: LabColors.white,
   },
   cardContent: {
@@ -1313,6 +1341,17 @@ const styles = StyleSheet.create({
     position: 'relative',
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.three,
+  },
+  cardFlipTapBackground: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+  },
+  cardContentSurface: {
+    flex: 1,
+    zIndex: 1,
   },
   answerTouchArea: {
     flex: 1,
@@ -1449,7 +1488,6 @@ const styles = StyleSheet.create({
     backgroundColor: LabColors.white,
     padding: Spacing.four,
     gap: Spacing.three,
-    boxShadow: LabColors.shadow,
   },
   doneIcon: {
     width: 64,
