@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import '@/global.css';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -35,15 +36,17 @@ export default function TabLayout() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
-      {isBackendSchemaReady && (
-        <ThemePreferenceProvider>
-          <CardSplitPolicyProvider>
-            <TranslationStyleProvider>
-              <RootNavigator />
-            </TranslationStyleProvider>
-          </CardSplitPolicyProvider>
-        </ThemePreferenceProvider>
-      )}
+      <KeyboardProvider>
+        {isBackendSchemaReady && (
+          <ThemePreferenceProvider>
+            <CardSplitPolicyProvider>
+              <TranslationStyleProvider>
+                <RootNavigator />
+              </TranslationStyleProvider>
+            </CardSplitPolicyProvider>
+          </ThemePreferenceProvider>
+        )}
+      </KeyboardProvider>
     </GestureHandlerRootView>
   );
 }

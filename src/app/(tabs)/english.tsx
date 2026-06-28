@@ -12,42 +12,26 @@ export default function EnglishScreen() {
   const palette = useDailyPalette();
   const { groups, isInitialLoading, isRefreshing, errorMessage, refreshGroups } =
     useTranslationCardGroups();
+  const emptyStateInsets = {
+    paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
+    paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
+    paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+    paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
+  };
+  const contentInsets = {
+    paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
+    paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
+    paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+    paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
+  };
 
-  return (
-    <ScrollView
-      style={[styles.scrollView, { backgroundColor: palette.background }]}
-      contentContainerStyle={[
-        styles.content,
-        {
-          paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
-          paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
-          paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
-          paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
-        },
-      ]}
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={refreshGroups} tintColor={palette.primary} />
-      }>
-      <View style={styles.container}>
-        {isInitialLoading && groups.length === 0 && (
-          <View style={styles.loadingState}>
+  if (groups.length === 0) {
+    return (
+      <View style={[styles.screen, { backgroundColor: palette.background }]}>
+        <View style={[styles.centerState, emptyStateInsets]}>
+          {isInitialLoading ? (
             <ActivityIndicator color={palette.primary} />
-          </View>
-        )}
-
-        {!isInitialLoading && groups.length === 0 && !errorMessage && (
-          <View style={styles.centerState}>
-            <ThemedText type="title" selectable>
-              英語
-            </ThemedText>
-            <ThemedText themeColor="textSecondary" selectable>
-              まだ英語カードはありません。
-            </ThemedText>
-          </View>
-        )}
-
-        {errorMessage && groups.length === 0 && (
-          <View style={styles.centerState}>
+          ) : errorMessage ? (
             <View style={styles.statePanel}>
               <ThemedText style={styles.stateTitle} selectable>
                 読み込めませんでした
@@ -68,10 +52,30 @@ export default function EnglishScreen() {
                 </ThemedText>
               </Pressable>
             </View>
-          </View>
-        )}
+          ) : (
+            <View style={styles.statePanel}>
+              <ThemedText style={styles.stateTitle} selectable>
+                英語カードはまだありません
+              </ThemedText>
+              <ThemedText style={styles.stateText} selectable>
+                日記から英語カードを作ると、この英語タブに表示されます。
+              </ThemedText>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
 
-        {errorMessage && groups.length > 0 && (
+  return (
+    <ScrollView
+      style={[styles.scrollView, { backgroundColor: palette.background }]}
+      contentContainerStyle={[styles.content, contentInsets]}
+      refreshControl={
+        <RefreshControl refreshing={isRefreshing} onRefresh={refreshGroups} tintColor={palette.primary} />
+      }>
+      <View style={styles.container}>
+        {errorMessage && (
           <View
             style={[
               styles.errorBanner,
@@ -86,7 +90,7 @@ export default function EnglishScreen() {
           </View>
         )}
 
-        {groups.length > 0 && <EnglishPracticeDeck groups={groups} />}
+        <EnglishPracticeDeck groups={groups} />
       </View>
     </ScrollView>
   );
@@ -95,6 +99,10 @@ export default function EnglishScreen() {
 const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
+  },
+  screen: {
+    flex: 1,
+    alignItems: 'center',
   },
   content: {
     alignItems: 'center',
@@ -105,12 +113,6 @@ const styles = StyleSheet.create({
     maxWidth: MaxContentWidth,
     gap: Spacing.three,
   },
-  loadingState: {
-    minHeight: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingVertical: Spacing.three,
-  },
   errorBanner: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 16,
@@ -118,9 +120,11 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
   },
   centerState: {
-    minHeight: 360,
+    flex: 1,
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: Spacing.three,
   },
   statePanel: {
     width: '100%',

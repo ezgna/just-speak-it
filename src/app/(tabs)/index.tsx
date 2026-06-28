@@ -8,6 +8,7 @@ import {
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Keyboard, ScrollView, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
+import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/just-speak-it-ui';
@@ -70,6 +71,7 @@ export default function HomeScreen() {
   const { translationStyle } = useTranslationStyle();
   const [entryMode, setEntryMode] = useState<EntryMode>('voice');
   const [diaryDraftText, setDiaryDraftText] = useState('');
+  const [writeDraftText, setWriteDraftText] = useState('');
   const [diaryDraftSource, setDiaryDraftSource] = useState<DiaryDraftSource>('text');
   const [isRecordingBusy, setIsRecordingBusy] = useState(false);
   const [recordingIntentActive, setRecordingIntentActive] = useState(false);
@@ -97,6 +99,7 @@ export default function HomeScreen() {
   const waveformMeteringSamplesRef = useRef<number[]>([]);
   const currentDraft = activeDraft?.cardSplitPolicy === cardSplitPolicy ? activeDraft : null;
 
+  const isWriteMode = entryMode === 'write';
   const isRecordingButtonActive = recorderState.isRecording || isStoppingRecording;
   const isWritingButtonActive =
     !isRecordingButtonActive && (isTranscribing || isPreparingDraft || isCompletingPractice);
@@ -111,36 +114,43 @@ export default function HomeScreen() {
   const isRecordingButtonDisabled =
     isWorking || (recordingIntentActive && !recorderState.isRecording);
   const isDraftInputEditable =
-    entryMode === 'write' &&
+    isWriteMode &&
     !recorderState.isRecording &&
     !isWorking &&
     !currentDraft &&
     completedPracticeCards.length === 0;
   const isVoiceTranscriptInputEditable =
+    !isWriteMode &&
     diaryDraftSource === 'voice' &&
     !recorderState.isRecording &&
     !isWorking &&
     !currentDraft &&
     completedPracticeCards.length === 0;
-  const hasDraftText = diaryDraftText.trim().length > 0;
+  const hasVoiceDraftText = diaryDraftText.trim().length > 0;
+  const hasWriteDraftText = writeDraftText.trim().length > 0;
   const hasActiveDraft = Boolean(currentDraft && draftCards.length > 0);
   const hasCompletedPracticeCards = completedPracticeCards.length > 0;
+  const hasCurrentDraftText = isWriteMode
+    ? hasWriteDraftText
+    : diaryDraftSource === 'voice' && hasVoiceDraftText;
   const shouldShowTranscribedPreview =
+    !isWriteMode &&
     isPreparingDraft &&
     diaryDraftSource === 'voice' &&
-    hasDraftText &&
+    hasVoiceDraftText &&
     !hasActiveDraft &&
     !hasCompletedPracticeCards;
   const shouldShowVoiceTranscriptEditor =
+    !isWriteMode &&
     diaryDraftSource === 'voice' &&
-    hasDraftText &&
+    hasVoiceDraftText &&
     !hasActiveDraft &&
     !hasCompletedPracticeCards &&
     !shouldShowTranscribedPreview;
+  const shouldShowTranscriptionError = !isWriteMode && Boolean(transcriptionError);
   const isEntryIdle = !hasActiveDraft && !hasCompletedPracticeCards;
-  const isWriteMode = entryMode === 'write';
   const shouldShowSplitAction =
-    hasDraftText &&
+    hasCurrentDraftText &&
     !hasActiveDraft &&
     !hasCompletedPracticeCards &&
     !isRecordingButtonActive &&
@@ -156,11 +166,12 @@ export default function HomeScreen() {
     hasActiveDraft ||
     hasCompletedPracticeCards ||
     !isWriteMode ||
-    (isWriteMode && (hasDraftText || isWritingButtonActive));
+    (isWriteMode && (hasCurrentDraftText || isWritingButtonActive));
   const shouldDismissKeyboardOnContentTap =
     (isWriteMode || shouldShowVoiceTranscriptEditor) &&
     !hasActiveDraft &&
     !hasCompletedPracticeCards;
+  const shouldAvoidKeyboard = shouldDismissKeyboardOnContentTap;
 
   const markDraftInteraction = useCallback(() => {
     draftInteractionVersionRef.current += 1;
@@ -199,6 +210,7 @@ export default function HomeScreen() {
     clearPendingLocalRecordingAction();
     setEntryMode('voice');
     setDiaryDraftText('');
+    setWriteDraftText('');
     setDiaryDraftSource('text');
     setRawTranscriptText(null);
     setIsTranscriptEdited(false);
@@ -640,15 +652,18 @@ export default function HomeScreen() {
       return;
     }
 
-    if (hasDraftText) {
+    if (hasCurrentDraftText) {
+      const currentDraftText = isWriteMode ? writeDraftText : diaryDraftText;
+      const currentDraftSource: DiaryDraftSource = isWriteMode ? 'text' : diaryDraftSource;
+
       await handlePrepareDraft({
-        diaryText: diaryDraftText,
-        source: diaryDraftSource,
-        rawTranscriptText,
-        transcriptWords,
-        waveformPeaks,
-        isTranscriptEdited,
-        localRecordingId: diaryDraftSource === 'voice' ? pendingLocalRecordingId : null,
+        diaryText: currentDraftText,
+        source: currentDraftSource,
+        rawTranscriptText: currentDraftSource === 'voice' ? rawTranscriptText : null,
+        transcriptWords: currentDraftSource === 'voice' ? transcriptWords : [],
+        waveformPeaks: currentDraftSource === 'voice' ? waveformPeaks : [],
+        isTranscriptEdited: currentDraftSource === 'voice' ? isTranscriptEdited : false,
+        localRecordingId: currentDraftSource === 'voice' ? pendingLocalRecordingId : null,
       });
       return;
     }
@@ -675,7 +690,7 @@ export default function HomeScreen() {
     }
   }
 
-  function handleDraftTextChange(nextText: string) {
+  function handleVoiceTranscriptTextChange(nextText: string) {
     markDraftInteraction();
     clearDraftClientRequestId();
     clearRetryRecordingAction();
@@ -700,27 +715,35 @@ export default function HomeScreen() {
     setCompletedPracticeCards([]);
   }
 
-  function handleEnterWriteMode() {
+  function handleWriteDraftTextChange(nextText: string) {
     markDraftInteraction();
     clearDraftClientRequestId();
-    clearRetryRecordingAction();
-    clearPendingLocalRecordingAction();
-    Keyboard.dismiss();
-    setEntryMode('write');
-    setDiaryDraftSource('text');
-    setRawTranscriptText(null);
-    setIsTranscriptEdited(false);
-    setTranscriptWords([]);
-    setWaveformPeaks([]);
-    setTranscriptionError(null);
+    setWriteDraftText(nextText);
     setGenerationError(null);
     setActiveDraft(null);
     setDraftCards([]);
     setCompletedPracticeCards([]);
   }
 
-  function handleEnterVoiceMode() {
+  function handleEnterWriteMode() {
+    markDraftInteraction();
+    clearDraftClientRequestId();
     Keyboard.dismiss();
+    setEntryMode('write');
+    setGenerationError(null);
+  }
+
+  function handleEnterVoiceMode() {
+    markDraftInteraction();
+    clearDraftClientRequestId();
+    Keyboard.dismiss();
+
+    if (!hasActiveDraft && !hasCompletedPracticeCards) {
+      setEntryMode('voice');
+      setGenerationError(null);
+      return;
+    }
+
     resetDraftState();
   }
 
@@ -777,7 +800,7 @@ export default function HomeScreen() {
         hasActiveDraft && !isCompletingPractice ? styles.contentAreaWithTopAction : null,
       ]}>
       <View style={styles.draftStack}>
-        {transcriptionError && (
+        {shouldShowTranscriptionError && transcriptionError && (
           <View style={styles.errorStack}>
             <ThemedText style={[styles.errorText, { color: palette.coral }]} selectable>
               {transcriptionError}
@@ -802,7 +825,7 @@ export default function HomeScreen() {
         ) : hasCompletedPracticeCards ? (
           <GeneratedPracticePreview cards={completedPracticeCards} />
         ) : shouldShowTranscribedPreview ? (
-          <TranscribedDiaryPreview text={diaryDraftText} />
+          <DiaryDraftPreview text={diaryDraftText} statusLabel="Splitting" />
         ) : shouldShowVoiceTranscriptEditor ? (
           <View style={styles.inputDismissArea}>
             <GlideTextInput
@@ -823,13 +846,13 @@ export default function HomeScreen() {
                   opacity: isVoiceTranscriptInputEditable ? 1 : 0.78,
                 },
               ]}
-              onChangeText={handleDraftTextChange}
+              onChangeText={handleVoiceTranscriptTextChange}
             />
           </View>
         ) : isWriteMode ? (
           <View style={styles.inputDismissArea}>
             <GlideTextInput
-              value={diaryDraftText}
+              value={writeDraftText}
               tone="cream"
               accentTone="mint"
               variant="canvas"
@@ -847,7 +870,7 @@ export default function HomeScreen() {
                   opacity: isDraftInputEditable ? 1 : 0.78,
                 },
               ]}
-              onChangeText={handleDraftTextChange}
+              onChangeText={handleWriteDraftTextChange}
             />
           </View>
         ) : null}
@@ -929,26 +952,35 @@ export default function HomeScreen() {
     );
   }
 
-  return (
-    <View
-      style={[
-        styles.screen,
-        {
-          backgroundColor: palette.background,
-          paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
-          paddingBottom: safeAreaInsets.bottom + Spacing.three,
-          paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
-          paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
-        },
-      ]}>
+  const screenStyle = [
+    styles.screen,
+    {
+      backgroundColor: palette.background,
+      paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
+      paddingBottom: safeAreaInsets.bottom + Spacing.three,
+      paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+      paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
+    },
+  ];
+  const wrappedContentArea = shouldDismissKeyboardOnContentTap ? (
+    <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
+      {contentArea}
+    </TouchableWithoutFeedback>
+  ) : (
+    contentArea
+  );
+  const screenContent = (
+    <>
       {topActionButton}
 
-      {shouldDismissKeyboardOnContentTap ? (
-        <TouchableWithoutFeedback accessible={false} onPress={Keyboard.dismiss}>
-          {contentArea}
-        </TouchableWithoutFeedback>
+      {shouldAvoidKeyboard ? (
+        <KeyboardAvoidingView
+          behavior="padding"
+          style={styles.keyboardContentArea}>
+          {wrappedContentArea}
+        </KeyboardAvoidingView>
       ) : (
-        contentArea
+        wrappedContentArea
       )}
 
       {shouldShowBottomPrimaryAction ? (
@@ -956,16 +988,18 @@ export default function HomeScreen() {
           {renderPrimaryActionButton()}
         </View>
       ) : null}
-    </View>
+    </>
   );
+
+  return <View style={screenStyle}>{screenContent}</View>;
 }
 
-function TranscribedDiaryPreview({ text }: { text: string }) {
+function DiaryDraftPreview({ text, statusLabel }: { text: string; statusLabel: string }) {
   return (
     <View style={styles.transcribedPreview}>
       <View style={styles.transcribedStatusRow}>
         <View style={styles.transcribedStatusDot} />
-        <ThemedText style={styles.transcribedStatusText}>Splitting</ThemedText>
+        <ThemedText style={styles.transcribedStatusText}>{statusLabel}</ThemedText>
       </View>
       <ScrollView
         accessibilityLabel="文字起こし済みの日記本文"
@@ -1023,6 +1057,11 @@ const styles = StyleSheet.create({
   },
   contentAreaWithTopAction: {
     paddingTop: Spacing.six,
+  },
+  keyboardContentArea: {
+    flex: 1,
+    width: '100%',
+    maxWidth: MaxContentWidth,
   },
   draftStack: {
     flex: 1,

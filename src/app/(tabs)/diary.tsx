@@ -193,47 +193,36 @@ export default function DiaryScreen() {
     };
   }, [loadEntries, queuedSyncVersion]);
 
-  return (
-    <ScrollView
-      style={[styles.scrollView, { backgroundColor: palette.background }]}
-      scrollEnabled={!isWaveformScrubbing}
-      contentContainerStyle={[
-        styles.content,
-        {
-          paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
-          paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
-          paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
-          paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
-        },
-      ]}
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={refreshEntries} tintColor={palette.primary} />
-      }>
-      <View style={styles.container}>
-        {isInitialLoading && entries.length === 0 && (
-          <DiaryStatePaper>
-            <ActivityIndicator color={DiaryColors.accent} />
-            <ThemedText style={styles.stateText} selectable>
-              日記を読み込んでいます。
-            </ThemedText>
-          </DiaryStatePaper>
-        )}
+  const emptyStateInsets = {
+    paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
+    paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
+    paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+    paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
+  };
+  const contentInsets = {
+    paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
+    paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.four,
+    paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+    paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
+  };
 
-        {!isInitialLoading && entries.length === 0 && !errorMessage && (
-          <DiaryStatePaper>
-            <ThemedText style={styles.stateText} selectable>
-              まだ積まれた日記はありません。
-            </ThemedText>
-          </DiaryStatePaper>
-        )}
-
-        {errorMessage && entries.length === 0 && (
-          <View style={styles.centerState}>
+  if (entries.length === 0) {
+    return (
+      <View style={[styles.screen, { backgroundColor: palette.background }]}>
+        <View style={[styles.centerState, emptyStateInsets]}>
+          {isInitialLoading ? (
+            <DiaryStatePaper>
+              <ActivityIndicator color={DiaryColors.accent} />
+              <ThemedText style={styles.loadingStateText} selectable>
+                日記を読み込んでいます。
+              </ThemedText>
+            </DiaryStatePaper>
+          ) : errorMessage ? (
             <View style={styles.statePanel}>
               <ThemedText style={styles.stateTitle} selectable>
                 読み込めませんでした
               </ThemedText>
-              <ThemedText style={styles.stateDescription} selectable>
+              <ThemedText style={styles.stateText} selectable>
                 {errorMessage}
               </ThemedText>
               <Pressable
@@ -249,10 +238,31 @@ export default function DiaryScreen() {
                 </ThemedText>
               </Pressable>
             </View>
-          </View>
-        )}
+          ) : (
+            <View style={styles.statePanel}>
+              <ThemedText style={styles.stateTitle} selectable>
+                日記はまだありません
+              </ThemedText>
+              <ThemedText style={styles.stateText} selectable>
+                今日タブで話すか書くと、この日記タブに表示されます。
+              </ThemedText>
+            </View>
+          )}
+        </View>
+      </View>
+    );
+  }
 
-        {errorMessage && entries.length > 0 && (
+  return (
+    <ScrollView
+      style={[styles.scrollView, { backgroundColor: palette.background }]}
+      scrollEnabled={!isWaveformScrubbing}
+      contentContainerStyle={[styles.content, contentInsets]}
+      refreshControl={
+        <RefreshControl refreshing={isRefreshing} onRefresh={refreshEntries} tintColor={palette.primary} />
+      }>
+      <View style={styles.container}>
+        {errorMessage && (
           <View style={styles.errorBanner}>
             <ThemedText type="smallBold" style={styles.errorText} selectable>
               {errorMessage}
@@ -260,19 +270,17 @@ export default function DiaryScreen() {
           </View>
         )}
 
-        {entries.length > 0 && (
-          <View style={styles.diaryPaperList}>
-            <DiaryModeSwitch value={displayMode} onChange={handleDisplayModeChange} />
-            {entries.map((entry) => (
-              <DiaryPaper
-                key={entry.id}
-                entry={entry}
-                displayMode={displayMode}
-                onWaveformScrubbingChange={setIsWaveformScrubbing}
-              />
-            ))}
-          </View>
-        )}
+        <View style={styles.diaryPaperList}>
+          <DiaryModeSwitch value={displayMode} onChange={handleDisplayModeChange} />
+          {entries.map((entry) => (
+            <DiaryPaper
+              key={entry.id}
+              entry={entry}
+              displayMode={displayMode}
+              onWaveformScrubbingChange={setIsWaveformScrubbing}
+            />
+          ))}
+        </View>
       </View>
     </ScrollView>
   );
@@ -717,6 +725,10 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
+  screen: {
+    flex: 1,
+    alignItems: 'center',
+  },
   content: {
     alignItems: 'center',
   },
@@ -727,7 +739,10 @@ const styles = StyleSheet.create({
     gap: Spacing.three,
   },
   centerState: {
-    minHeight: 360,
+    flex: 1,
+    width: '100%',
+    maxWidth: MaxContentWidth,
+    alignItems: 'center',
     justifyContent: 'center',
   },
   diaryPaperList: {
@@ -931,7 +946,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     justifyContent: 'center',
   },
-  stateText: {
+  loadingStateText: {
     color: DiaryColors.bodyText,
     fontSize: 17,
     lineHeight: 28,
@@ -953,7 +968,7 @@ const styles = StyleSheet.create({
     lineHeight: 31,
     fontWeight: 800,
   },
-  stateDescription: {
+  stateText: {
     color: '#5F6670',
     fontSize: 16,
     lineHeight: 24,
