@@ -3,6 +3,7 @@ import * as Haptics from 'expo-haptics';
 import * as Speech from 'expo-speech';
 import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  type LayoutChangeEvent,
   Pressable,
   StyleSheet,
   unstable_batchedUpdates,
@@ -48,6 +49,10 @@ import {
 type SlackFlashcardLabProps = {
   groups: TranslationCardGroup[];
   safeAreaInsets: EdgeInsets;
+  footerAccessory?: ReactNode;
+  headerAccessory?: ReactNode;
+  onDueCountChange?: (dueCount: number) => void;
+  variant?: 'screen' | 'embedded';
 };
 
 type UndoEntry = {
@@ -73,6 +78,7 @@ const BackCardTranslateY = 38;
 const BackCardScale = 0.93;
 const DeepCardTranslateY = BackCardTranslateY;
 const DeepCardScale = 0.88;
+const EmbeddedCardFooterClearance = BackCardTranslateY + Spacing.two;
 const ActiveBackCardTranslateY = 12;
 const ActiveBackCardScale = 0.985;
 const DeepCardDragLag = 0.78;
@@ -93,9 +99,17 @@ const DecisionRingRadius = (DecisionRingSize - DecisionRingStrokeWidth) / 2;
 const DecisionRingCircumference = 2 * Math.PI * DecisionRingRadius;
 const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
-export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabProps) {
+export function SlackFlashcardLab({
+  footerAccessory,
+  groups,
+  headerAccessory,
+  onDueCountChange,
+  safeAreaInsets,
+  variant = 'screen',
+}: SlackFlashcardLabProps) {
   const { width, height } = useWindowDimensions();
   const palette = useDailyPalette();
+  const isEmbedded = variant === 'embedded';
   const translateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const promotionProgress = useSharedValue(0);
@@ -109,25 +123,79 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   const [pendingStatusUpdates, setPendingStatusUpdates] = useState<PendingStatusUpdate[]>([]);
   const [frontPinnedCard, setFrontPinnedCard] = useState<PracticeCard | null>(null);
   const [isAnswerVisible, setIsAnswerVisible] = useState(false);
+  const [bodySize, setBodySize] = useState({ width: 0, height: 0 });
+  const [rootSize, setRootSize] = useState({ width: 0, height: 0 });
   const [visualQueue, setVisualQueue] = useState<PracticeCard[] | null>(null);
   const [pendingVisualQueueRelease, setPendingVisualQueueRelease] = useState(0);
   const [undoStack, setUndoStack] = useState<UndoEntry[]>([]);
 
-  const horizontalPadding =
-    Math.max(safeAreaInsets.left, Spacing.three) +
-    Math.max(safeAreaInsets.right, Spacing.three);
+  const rootWidth = rootSize.width > 0 ? rootSize.width : width;
+  const horizontalPadding = isEmbedded
+    ? 0
+    : Math.max(safeAreaInsets.left, Spacing.three) +
+      Math.max(safeAreaInsets.right, Spacing.three);
   const verticalReservedSpace =
     safeAreaInsets.top + TopTabInset + safeAreaInsets.bottom + BottomTabInset + 252;
-  const cardWidth = Math.min(width - horizontalPadding, 560);
-  const cardHeight = Math.min(Math.max(height - verticalReservedSpace, 360), 540);
+  const cardWidth = Math.min(Math.max(rootWidth - horizontalPadding, 0), 560);
+  const measuredBodyHeight = bodySize.height > 0 ? bodySize.height : 360;
+  const embeddedMinCardHeight = Math.min(measuredBodyHeight, 220);
+  const embeddedCardHeight = Math.max(
+    embeddedMinCardHeight,
+    measuredBodyHeight - EmbeddedCardFooterClearance
+  );
+  const cardHeight = isEmbedded
+    ? embeddedCardHeight
+    : Math.min(Math.max(height - verticalReservedSpace, 360), 540);
+  const stageHeight = isEmbedded ? '100%' : cardHeight;
   const swipeThreshold = Math.max(88, cardWidth * 0.22);
   const swipeOutDistance = width + 180;
-  const rootInsets = {
-    paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
-    paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
-    paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
-    paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
-  };
+  const rootInsets = isEmbedded
+    ? {
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        paddingRight: 0,
+      }
+    : {
+        paddingTop: safeAreaInsets.top + TopTabInset + Spacing.two,
+        paddingBottom: safeAreaInsets.bottom + BottomTabInset + Spacing.three,
+        paddingLeft: Math.max(safeAreaInsets.left, Spacing.three),
+        paddingRight: Math.max(safeAreaInsets.right, Spacing.three),
+      };
+  const rootBackgroundColor = isEmbedded ? 'transparent' : palette.background;
+  const doneBodyText = isEmbedded
+    ? '次に復習日が来たカードから、この画面にまた出ます。'
+    : '次に復習日が来たカードから、この復習タブに戻ってきます。';
+
+  const handleRootLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width: nextWidth, height: nextHeight } = event.nativeEvent.layout;
+
+    setRootSize((currentSize) => {
+      if (
+        Math.abs(currentSize.width - nextWidth) < 1 &&
+        Math.abs(currentSize.height - nextHeight) < 1
+      ) {
+        return currentSize;
+      }
+
+      return { width: nextWidth, height: nextHeight };
+    });
+  }, []);
+
+  const handleBodyLayout = useCallback((event: LayoutChangeEvent) => {
+    const { width: nextWidth, height: nextHeight } = event.nativeEvent.layout;
+
+    setBodySize((currentSize) => {
+      if (
+        Math.abs(currentSize.width - nextWidth) < 1 &&
+        Math.abs(currentSize.height - nextHeight) < 1
+      ) {
+        return currentSize;
+      }
+
+      return { width: nextWidth, height: nextHeight };
+    });
+  }, []);
 
   const cards = useMemo(() => flattenTranslationCardGroups(groups), [groups]);
   const initialCardStatuses = useMemo<CardLearningProgresses>(() => {
@@ -181,6 +249,11 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
       ...availableQueue.filter((card) => card.id !== frontPinnedCard.id),
     ];
   }, [cardStatuses, frontPinnedCard, pendingDismissals, reviewQueue]);
+
+  useEffect(() => {
+    onDueCountChange?.(displayQueue.length);
+  }, [displayQueue.length, onDueCountChange]);
+
   const renderQueue = visualQueue ?? displayQueue;
   const visibleCards = useMemo(
     () => renderQueue.slice(0, VisibleCardCount),
@@ -533,11 +606,19 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
 
   if (!activeCard) {
     return (
-      <Animated.View style={[styles.root, rootInsets, { backgroundColor: palette.background }]}>
-        <View style={styles.content}>
+      <Animated.View
+        onLayout={handleRootLayout}
+        style={[
+          styles.root,
+          isEmbedded ? styles.embeddedRoot : null,
+          rootInsets,
+          { backgroundColor: rootBackgroundColor },
+        ]}>
+        <View style={[styles.content, isEmbedded ? styles.embeddedContent : null]}>
           <LabHeader
             dueCount={0}
             onUndo={handleUndoPress}
+            rightAccessory={headerAccessory}
             undoDisabled={undoStack.length === 0}
           />
           <View style={styles.doneStage}>
@@ -557,7 +638,7 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
                 今日の復習は完了です
               </ThemedText>
               <ThemedText style={styles.doneText} selectable>
-                次に復習日が来たカードから、この復習タブに戻ってきます。
+                {doneBodyText}
               </ThemedText>
             </View>
           </View>
@@ -567,50 +648,72 @@ export function SlackFlashcardLab({ groups, safeAreaInsets }: SlackFlashcardLabP
   }
 
   return (
-    <Animated.View style={[styles.root, rootInsets, { backgroundColor: palette.background }]}>
-      <View style={styles.content}>
+    <Animated.View
+      onLayout={handleRootLayout}
+      style={[
+        styles.root,
+        isEmbedded ? styles.embeddedRoot : null,
+        rootInsets,
+        { backgroundColor: rootBackgroundColor },
+      ]}>
+      <View style={[styles.content, isEmbedded ? styles.embeddedContent : null]}>
         <LabHeader
           dueCount={displayQueue.length}
           onUndo={handleUndoPress}
+          rightAccessory={headerAccessory}
           undoDisabled={undoStack.length === 0}
         />
 
-        <View style={[styles.stage, { width: cardWidth, height: cardHeight }]}>
-          <GestureDetector gesture={panGesture}>
-            <View collapsable={false} style={styles.cardStack}>
-              {visibleCards.map((card, position) => (
-                <SlackCardLayer
-                  key={card.id}
-                  card={card}
-                  cardHeight={cardHeight}
-                  cardWidth={cardWidth}
-                  isAnswerVisible={position === 0 && isAnswerVisible}
-                  onToggleAnswer={position === 0 ? handleToggleAnswerPress : undefined}
-                  position={position}
-                  promotionOwnerCardId={promotionOwnerCardId}
-                  promotionProgress={promotionProgress}
-                  swipeOwnerCardId={swipeOwnerCardId}
-                  swipeThreshold={swipeThreshold}
-                  trailingPromotionOwnerCardId={trailingPromotionOwnerCardId}
-                  translateX={translateX}
-                  translateY={translateY}
-                />
-              ))}
-            </View>
-          </GestureDetector>
+        <View onLayout={handleBodyLayout} style={styles.reviewBody}>
+          <View
+            style={[
+              styles.stage,
+              isEmbedded ? styles.embeddedStage : null,
+              { width: cardWidth, height: stageHeight },
+            ]}>
+            <GestureDetector gesture={panGesture}>
+              <View collapsable={false} style={styles.cardStack}>
+                {visibleCards.map((card, position) => (
+                  <SlackCardLayer
+                    key={card.id}
+                    card={card}
+                    cardHeight={cardHeight}
+                    cardWidth={cardWidth}
+                    isAnswerVisible={position === 0 && isAnswerVisible}
+                    onToggleAnswer={position === 0 ? handleToggleAnswerPress : undefined}
+                    position={position}
+                    promotionOwnerCardId={promotionOwnerCardId}
+                    promotionProgress={promotionProgress}
+                    swipeOwnerCardId={swipeOwnerCardId}
+                    swipeThreshold={swipeThreshold}
+                    trailingPromotionOwnerCardId={trailingPromotionOwnerCardId}
+                    translateX={translateX}
+                    translateY={translateY}
+                  />
+                ))}
+              </View>
+            </GestureDetector>
+          </View>
         </View>
 
-        <View style={styles.actionBar}>
-          <DecisionButton
-            label="もう一回"
-            tone="keep"
-            onPress={() => animateCardDecision('learning')}
-          />
-          <DecisionButton
-            label="言えた"
-            tone="read"
-            onPress={() => animateCardDecision('known')}
-          />
+        <View style={[styles.reviewFooter, isEmbedded ? styles.embeddedReviewFooter : null]}>
+          <View style={styles.actionBar}>
+            <DecisionButton
+              label="もう一回"
+              tone="keep"
+              onPress={() => animateCardDecision('learning')}
+            />
+            <DecisionButton
+              label="言えた"
+              tone="read"
+              onPress={() => animateCardDecision('known')}
+            />
+          </View>
+          {footerAccessory ? (
+            <View style={styles.footerAccessory}>
+              {footerAccessory}
+            </View>
+          ) : null}
         </View>
       </View>
     </Animated.View>
@@ -778,10 +881,12 @@ const SlackCardLayer = memo(function SlackCardLayer({
 function LabHeader({
   dueCount,
   onUndo,
+  rightAccessory,
   undoDisabled,
 }: {
   dueCount: number;
   onUndo: () => void;
+  rightAccessory?: ReactNode;
   undoDisabled: boolean;
 }) {
   return (
@@ -811,13 +916,15 @@ function LabHeader({
         />
       </Pressable>
 
-      <View style={styles.headerCenter}>
+      <View pointerEvents="none" style={styles.headerCenter}>
         <ThemedText style={styles.leftCount} selectable>
           残り {dueCount}
         </ThemedText>
       </View>
 
-      <View style={styles.headerIconButtonPlaceholder} />
+      <View style={styles.headerRightSlot}>
+        {rightAccessory ?? <View style={styles.headerIconButtonPlaceholder} />}
+      </View>
     </View>
   );
 }
@@ -1255,6 +1362,9 @@ const styles = StyleSheet.create({
     width: '100%',
     alignItems: 'center',
   },
+  embeddedRoot: {
+    minHeight: 0,
+  },
   content: {
     flex: 1,
     width: '100%',
@@ -1262,12 +1372,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: Spacing.three,
   },
+  embeddedContent: {
+    minHeight: 0,
+  },
   header: {
     width: '100%',
     minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    position: 'relative',
   },
   headerIconButton: {
     width: 48,
@@ -1278,10 +1392,18 @@ const styles = StyleSheet.create({
     borderWidth: 3,
     borderColor: LabColors.bodyText,
     backgroundColor: LabColors.white,
+    zIndex: 1,
   },
   headerIconButtonPlaceholder: {
     width: 48,
     height: 48,
+  },
+  headerRightSlot: {
+    minWidth: 48,
+    minHeight: 48,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    zIndex: 1,
   },
   headerFallbackIcon: {
     color: LabColors.bodyText,
@@ -1290,6 +1412,11 @@ const styles = StyleSheet.create({
     fontWeight: 800,
   },
   headerCenter: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1300,6 +1427,13 @@ const styles = StyleSheet.create({
     fontWeight: 900,
     fontVariant: ['tabular-nums'],
   },
+  reviewBody: {
+    flex: 1,
+    width: '100%',
+    minHeight: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   stage: {
     flex: 1,
     minHeight: 360,
@@ -1308,6 +1442,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     overflow: 'visible',
     zIndex: 1,
+  },
+  embeddedStage: {
+    flex: 1,
+    minHeight: 0,
+    maxHeight: '100%',
   },
   cardStack: {
     flex: 1,
@@ -1440,11 +1579,21 @@ const styles = StyleSheet.create({
     lineHeight: 46,
     fontWeight: 900,
   },
+  reviewFooter: {
+    width: '100%',
+    gap: Spacing.four,
+    zIndex: 4,
+  },
+  embeddedReviewFooter: {
+    paddingTop: Spacing.two,
+  },
+  footerAccessory: {
+    width: '100%',
+  },
   actionBar: {
     width: '100%',
     flexDirection: 'row',
     gap: Spacing.three,
-    zIndex: 4,
   },
   decisionButton: {
     flex: 1,

@@ -5,19 +5,20 @@ import {
   useAudioRecorder,
   useAudioRecorderState,
 } from 'expo-audio';
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Keyboard, ScrollView, StyleSheet, TouchableWithoutFeedback, View } from 'react-native';
 import { KeyboardAvoidingView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useDailyPalette } from '@/components/just-speak-it-ui';
 import { GeneratedPracticePreview } from '@/components/generated-practice-preview';
+import { SlackFlashcardLab } from '@/components/slack-flashcard-lab';
 import { ThemedText } from '@/components/themed-text';
 import { GlideButton } from '@/components/ui/glide-button';
 import { GlideTextInput } from '@/components/ui/glide-text-input';
 import { MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useCardSplitPolicy } from '@/hooks/use-card-split-policy';
+import { useTranslationCardGroups } from '@/hooks/use-translation-card-groups';
 import { useTranslationStyle } from '@/hooks/use-translation-style';
 import {
   appendMeteringSample,
@@ -30,12 +31,15 @@ import {
   discardPracticeDraft,
   getLatestPracticeDraft,
   preparePracticeDraft,
+  type CompletedPractice,
   type PracticeDraft,
   type PracticeDraftCard,
-  type TranslationCard,
+  type TranslationCardGroup,
 } from '@/lib/backend/practice';
+import { isCardDue } from '@/lib/card-learning-statuses';
 import { setHapticsAllowedDuringRecording } from '@/lib/audio-session-haptics';
 import { notifyPracticeChanged } from '@/lib/practice-refresh';
+import { flattenTranslationCardGroups } from '@/lib/practice-cards';
 import { transcribeRecording, type TranscriptionWord } from '@/lib/backend/transcription';
 import {
   clearLocalRecordingError,
@@ -69,6 +73,7 @@ export default function HomeScreen() {
   const recorderState = useAudioRecorderState(audioRecorder, RecordingStatusIntervalMs);
   const { cardSplitPolicy } = useCardSplitPolicy();
   const { translationStyle } = useTranslationStyle();
+  const { groups: reviewGroups } = useTranslationCardGroups();
   const [entryMode, setEntryMode] = useState<EntryMode>('voice');
   const [diaryDraftText, setDiaryDraftText] = useState('');
   const [writeDraftText, setWriteDraftText] = useState('');
@@ -91,9 +96,12 @@ export default function HomeScreen() {
   const [generationError, setGenerationError] = useState<string | null>(null);
   const [activeDraft, setActiveDraft] = useState<PracticeDraft | null>(null);
   const [draftCards, setDraftCards] = useState<PracticeDraftCard[]>([]);
-  const [completedPracticeCards, setCompletedPracticeCards] = useState<TranslationCard[]>([]);
+  const [completedPractice, setCompletedPractice] = useState<CompletedPractice | null>(null);
+  const [embeddedReviewDueState, setEmbeddedReviewDueState] = useState<{
+    groupKey: string;
+    dueCount: number;
+  } | null>(null);
   const generationInFlightRef = useRef(false);
-  const resetDraftOnBlurRef = useRef(false);
   const draftInteractionVersionRef = useRef(0);
   const draftClientRequestIdRef = useRef<string | null>(null);
   const waveformMeteringSamplesRef = useRef<number[]>([]);
@@ -117,19 +125,16 @@ export default function HomeScreen() {
     isWriteMode &&
     !recorderState.isRecording &&
     !isWorking &&
-    !currentDraft &&
-    completedPracticeCards.length === 0;
+    !currentDraft;
   const isVoiceTranscriptInputEditable =
     !isWriteMode &&
     diaryDraftSource === 'voice' &&
     !recorderState.isRecording &&
     !isWorking &&
-    !currentDraft &&
-    completedPracticeCards.length === 0;
+    !currentDraft;
   const hasVoiceDraftText = diaryDraftText.trim().length > 0;
   const hasWriteDraftText = writeDraftText.trim().length > 0;
   const hasActiveDraft = Boolean(currentDraft && draftCards.length > 0);
-  const hasCompletedPracticeCards = completedPracticeCards.length > 0;
   const hasCurrentDraftText = isWriteMode
     ? hasWriteDraftText
     : diaryDraftSource === 'voice' && hasVoiceDraftText;
@@ -138,40 +143,107 @@ export default function HomeScreen() {
     isPreparingDraft &&
     diaryDraftSource === 'voice' &&
     hasVoiceDraftText &&
-    !hasActiveDraft &&
-    !hasCompletedPracticeCards;
+    !hasActiveDraft;
   const shouldShowVoiceTranscriptEditor =
     !isWriteMode &&
     diaryDraftSource === 'voice' &&
     hasVoiceDraftText &&
     !hasActiveDraft &&
-    !hasCompletedPracticeCards &&
     !shouldShowTranscribedPreview;
   const shouldShowTranscriptionError = !isWriteMode && Boolean(transcriptionError);
-  const isEntryIdle = !hasActiveDraft && !hasCompletedPracticeCards;
+  const isEntryIdle = !hasActiveDraft;
   const shouldShowSplitAction =
     hasCurrentDraftText &&
     !hasActiveDraft &&
-    !hasCompletedPracticeCards &&
     !isRecordingButtonActive &&
     !isWritingButtonActive;
   const shouldShowMakeCardsAction =
-    hasActiveDraft && !hasCompletedPracticeCards && !isRecordingButtonActive && !isWritingButtonActive;
-  const shouldShowReviewAction =
-    hasCompletedPracticeCards &&
-    !isRecordingButtonActive &&
-    !isWritingButtonActive;
+    hasActiveDraft && !isRecordingButtonActive && !isWritingButtonActive;
   const shouldShowModeSwitch = isEntryIdle && !isRecordingButtonActive && !isWritingButtonActive;
-  const shouldShowBottomPrimaryAction =
-    hasActiveDraft ||
-    hasCompletedPracticeCards ||
-    !isWriteMode ||
-    (isWriteMode && (hasCurrentDraftText || isWritingButtonActive));
+  const shouldKeepEmbeddedReviewVisible =
+    recordingIntentActive || isRecordingButtonActive || isTranscribing;
   const shouldDismissKeyboardOnContentTap =
     (isWriteMode || shouldShowVoiceTranscriptEditor) &&
-    !hasActiveDraft &&
-    !hasCompletedPracticeCards;
+    !hasActiveDraft;
   const shouldAvoidKeyboard = shouldDismissKeyboardOnContentTap;
+  const completedPracticeGroup = useMemo<TranslationCardGroup | null>(() => {
+    if (!completedPractice) {
+      return null;
+    }
+
+    return {
+      cardSplitPolicy: completedPractice.cardSplitPolicy,
+      diaryEntryId: completedPractice.diaryEntry.id,
+      practiceGenerationId: completedPractice.practiceGenerationId,
+      source: completedPractice.source,
+      translationStyle: completedPractice.translationStyle,
+      isTranscriptEdited: completedPractice.diaryEntry.isTranscriptEdited,
+      diaryText: completedPractice.diaryEntry.plainText,
+      diaryExcerpt: completedPractice.diaryEntry.plainText,
+      createdAt: completedPractice.diaryEntry.createdAt,
+      cards: completedPractice.cards,
+    };
+  }, [completedPractice]);
+  const embeddedReviewGroups = useMemo(() => {
+    if (!completedPracticeGroup) {
+      return reviewGroups;
+    }
+
+    if (
+      reviewGroups.some(
+        (group) => group.practiceGenerationId === completedPracticeGroup.practiceGenerationId
+      )
+    ) {
+      return reviewGroups;
+    }
+
+    return [
+      completedPracticeGroup,
+      ...reviewGroups.filter(
+        (group) => group.practiceGenerationId !== completedPracticeGroup.practiceGenerationId
+      ),
+    ];
+  }, [completedPracticeGroup, reviewGroups]);
+  const hasEmbeddedReviewCards = useMemo(() => {
+    return flattenTranslationCardGroups(embeddedReviewGroups).some((card) =>
+      isCardDue({ [card.id]: card.learningProgress }, card.id)
+    );
+  }, [embeddedReviewGroups]);
+  const embeddedReviewGroupKey = useMemo(
+    () => embeddedReviewGroups.map((group) => group.practiceGenerationId).join('|'),
+    [embeddedReviewGroups]
+  );
+  const embeddedReviewDueCount =
+    embeddedReviewDueState?.groupKey === embeddedReviewGroupKey
+      ? embeddedReviewDueState.dueCount
+      : null;
+  const shouldShowEmbeddedReview =
+    !isWriteMode &&
+    isEntryIdle &&
+    !hasCurrentDraftText &&
+    (shouldKeepEmbeddedReviewVisible || !isWritingButtonActive) &&
+    hasEmbeddedReviewCards &&
+    embeddedReviewDueCount !== 0;
+  const shouldShowBottomPrimaryAction =
+    !shouldShowEmbeddedReview &&
+    (hasActiveDraft ||
+      !isWriteMode ||
+      (isWriteMode && (hasCurrentDraftText || isWritingButtonActive)));
+  const handleEmbeddedReviewDueCountChange = useCallback(
+    (dueCount: number) => {
+      setEmbeddedReviewDueState((currentState) => {
+        if (
+          currentState?.groupKey === embeddedReviewGroupKey &&
+          currentState.dueCount === dueCount
+        ) {
+          return currentState;
+        }
+
+        return { groupKey: embeddedReviewGroupKey, dueCount };
+      });
+    },
+    [embeddedReviewGroupKey]
+  );
 
   const markDraftInteraction = useCallback(() => {
     draftInteractionVersionRef.current += 1;
@@ -220,14 +292,14 @@ export default function HomeScreen() {
     setGenerationError(null);
     setActiveDraft(null);
     setDraftCards([]);
-    setCompletedPracticeCards([]);
+    setCompletedPractice(null);
   }, [clearPendingLocalRecordingAction, clearRetryRecordingAction, markDraftInteraction]);
 
   const applyPracticeDraft = useCallback((draft: PracticeDraft) => {
     draftClientRequestIdRef.current = null;
     setActiveDraft(draft);
     setDraftCards(draft.cards);
-    setCompletedPracticeCards([]);
+    setCompletedPractice(null);
     setDiaryDraftText(draft.diaryEntry.plainText);
     setDiaryDraftSource(draft.source);
     setRawTranscriptText(draft.source === 'voice' ? draft.diaryEntry.originalText : null);
@@ -241,19 +313,6 @@ export default function HomeScreen() {
         : null
     );
   }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      return () => {
-        if (!resetDraftOnBlurRef.current) {
-          return;
-        }
-
-        resetDraftOnBlurRef.current = false;
-        resetDraftState();
-      };
-    }, [resetDraftState])
-  );
 
   useEffect(() => {
     let isCancelled = false;
@@ -357,7 +416,6 @@ export default function HomeScreen() {
       setWaveformPeaks([]);
       setActiveDraft(null);
       setDraftCards([]);
-      setCompletedPracticeCards([]);
     } catch (error) {
       setRecordingIntentActive(false);
       void setRecordingHapticsAllowed(false);
@@ -474,7 +532,7 @@ export default function HomeScreen() {
       setDiaryDraftSource(cleanedText ? 'voice' : 'text');
       setActiveDraft(null);
       setDraftCards([]);
-      setCompletedPracticeCards([]);
+      setCompletedPractice(null);
 
       if (localRecordingId) {
         setPendingLocalRecordingId(localRecordingId);
@@ -530,7 +588,7 @@ export default function HomeScreen() {
     setGenerationError(null);
     setActiveDraft(null);
     setDraftCards([]);
-    setCompletedPracticeCards([]);
+    setCompletedPractice(null);
     const nextVoiceWaveformPeaks =
       source === 'voice' ? normalizeWaveformPeaks(nextWaveformPeaks ?? waveformPeaks) : [];
 
@@ -594,16 +652,15 @@ export default function HomeScreen() {
         translationStyle,
       });
       clearDraftClientRequestId();
-      setCompletedPracticeCards(practice.cards);
       setActiveDraft(null);
       setDraftCards([]);
-      setDiaryDraftText(practice.diaryEntry.plainText);
-      setDiaryDraftSource(practice.source);
-      setIsTranscriptEdited(
-        practice.source === 'voice' ? practice.diaryEntry.isTranscriptEdited : false
-      );
-      setTranscriptWords(practice.source === 'voice' ? practice.diaryEntry.transcriptWords : []);
-      setWaveformPeaks(practice.source === 'voice' ? practice.diaryEntry.waveformPeaks : []);
+      setCompletedPractice(practice);
+      setDiaryDraftText('');
+      setDiaryDraftSource('text');
+      setRawTranscriptText(null);
+      setIsTranscriptEdited(false);
+      setTranscriptWords([]);
+      setWaveformPeaks([]);
       notifyPracticeChanged();
     } catch (error) {
       logBackendError('completePracticeDraft', error);
@@ -638,12 +695,6 @@ export default function HomeScreen() {
     if (recorderState.isRecording) {
       setWritingPressHeld(true);
       await stopRecording();
-      return;
-    }
-
-    if (shouldShowReviewAction) {
-      resetDraftOnBlurRef.current = true;
-      router.push('/flashcards');
       return;
     }
 
@@ -712,7 +763,7 @@ export default function HomeScreen() {
     setGenerationError(null);
     setActiveDraft(null);
     setDraftCards([]);
-    setCompletedPracticeCards([]);
+    setCompletedPractice(null);
   }
 
   function handleWriteDraftTextChange(nextText: string) {
@@ -722,7 +773,7 @@ export default function HomeScreen() {
     setGenerationError(null);
     setActiveDraft(null);
     setDraftCards([]);
-    setCompletedPracticeCards([]);
+    setCompletedPractice(null);
   }
 
   function handleEnterWriteMode() {
@@ -738,7 +789,7 @@ export default function HomeScreen() {
     clearDraftClientRequestId();
     Keyboard.dismiss();
 
-    if (!hasActiveDraft && !hasCompletedPracticeCards) {
+    if (!hasActiveDraft) {
       setEntryMode('voice');
       setGenerationError(null);
       return;
@@ -746,6 +797,22 @@ export default function HomeScreen() {
 
     resetDraftState();
   }
+
+  const modeSwitchButton = shouldShowModeSwitch ? (
+    <GlideButton
+      label={isWriteMode ? '話す' : '書く'}
+      accessibilityLabel={isWriteMode ? '話すモードに戻る' : '書くモードに切り替える'}
+      icon={
+        isWriteMode
+          ? { ios: 'mic.fill', android: 'mic', web: 'mic' }
+          : { ios: 'square.and.pencil', android: 'edit', web: 'edit' }
+      }
+      tone={isWriteMode ? 'mint' : 'cream'}
+      size="compact"
+      fullWidth={false}
+      onPress={isWriteMode ? handleEnterVoiceMode : handleEnterWriteMode}
+    />
+  ) : null;
 
   const topActionButton = hasActiveDraft && !isCompletingPractice ? (
     <View
@@ -767,7 +834,7 @@ export default function HomeScreen() {
         onPress={handleDiscardDraft}
       />
     </View>
-  ) : shouldShowModeSwitch ? (
+  ) : modeSwitchButton && !shouldShowEmbeddedReview ? (
     <View
       pointerEvents="box-none"
       style={[
@@ -777,19 +844,7 @@ export default function HomeScreen() {
           right: Math.max(safeAreaInsets.right, Spacing.three),
         },
       ]}>
-      <GlideButton
-        label={isWriteMode ? '話す' : '書く'}
-        accessibilityLabel={isWriteMode ? '話すモードに戻る' : '書くモードに切り替える'}
-        icon={
-          isWriteMode
-            ? { ios: 'mic.fill', android: 'mic', web: 'mic' }
-            : { ios: 'square.and.pencil', android: 'edit', web: 'edit' }
-        }
-        tone={isWriteMode ? 'mint' : 'cream'}
-        size="compact"
-        fullWidth={false}
-        onPress={isWriteMode ? handleEnterVoiceMode : handleEnterWriteMode}
-      />
+      {modeSwitchButton}
     </View>
   ) : null;
 
@@ -822,8 +877,17 @@ export default function HomeScreen() {
 
         {hasActiveDraft ? (
           <GeneratedPracticePreview cards={draftCards} />
-        ) : hasCompletedPracticeCards ? (
-          <GeneratedPracticePreview cards={completedPracticeCards} />
+        ) : shouldShowEmbeddedReview ? (
+          <View style={styles.embeddedReviewArea}>
+            <SlackFlashcardLab
+              footerAccessory={renderPrimaryActionButton()}
+              groups={embeddedReviewGroups}
+              headerAccessory={modeSwitchButton}
+              onDueCountChange={handleEmbeddedReviewDueCountChange}
+              safeAreaInsets={safeAreaInsets}
+              variant="embedded"
+            />
+          </View>
         ) : shouldShowTranscribedPreview ? (
           <DiaryDraftPreview text={diaryDraftText} statusLabel="Splitting" />
         ) : shouldShowVoiceTranscriptEditor ? (
@@ -896,35 +960,29 @@ export default function HomeScreen() {
                 ? 'Making it'
                 : isRecordingButtonActive
                   ? recordingButtonDurationLabel
-                  : shouldShowReviewAction
-                    ? 'Review it'
-                    : shouldShowMakeCardsAction
-                      ? 'Make cards'
-                      : shouldShowSplitAction
-                        ? 'Split it'
-                        : 'Speak it'
+                  : shouldShowMakeCardsAction
+                    ? 'Make cards'
+                    : shouldShowSplitAction
+                      ? 'Split it'
+                      : 'Speak it'
         }
         accessibilityLabel={
           isRecordingButtonActive
             ? `録音を停止 ${recordingButtonDurationLabel}`
-            : shouldShowReviewAction
-              ? '作った英語カードを復習する'
-              : shouldShowMakeCardsAction
-                ? '英語カードを作る'
-                : shouldShowSplitAction
-                  ? '日本語を英語カード向けに分割する'
-                  : undefined
+            : shouldShowMakeCardsAction
+              ? '英語カードを作る'
+              : shouldShowSplitAction
+                ? '日本語を英語カード向けに分割する'
+                : undefined
         }
         icon={
           isRecordingButtonActive
             ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
-            : shouldShowReviewAction
-              ? { ios: 'rectangle.stack.fill', android: 'layers', web: 'layers' }
-              : shouldShowMakeCardsAction
-                ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
-                : shouldShowSplitAction || isPreparingDraft
-                  ? { ios: 'rectangle.split.2x1.fill', android: 'splitscreen', web: 'splitscreen' }
-                  : { ios: 'mic.fill', android: 'mic', web: 'mic' }
+            : shouldShowMakeCardsAction
+              ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
+              : shouldShowSplitAction || isPreparingDraft
+                ? { ios: 'rectangle.split.2x1.fill', android: 'splitscreen', web: 'splitscreen' }
+                : { ios: 'mic.fill', android: 'mic', web: 'mic' }
         }
         busy={isPrimaryButtonBusy}
         tone={
@@ -934,13 +992,11 @@ export default function HomeScreen() {
               ? 'blue'
               : isRecordingButtonActive
                 ? 'orange'
-                : shouldShowReviewAction
-                  ? 'grape'
-                  : shouldShowMakeCardsAction
-                    ? 'blue'
-                    : shouldShowSplitAction
-                      ? 'orange'
-                      : 'mint'
+                : shouldShowMakeCardsAction
+                  ? 'blue'
+                  : shouldShowSplitAction
+                    ? 'orange'
+                    : 'mint'
         }
         size="large"
         disabled={isRecordingButtonDisabled}
@@ -1072,6 +1128,11 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     width: '100%',
+  },
+  embeddedReviewArea: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
   },
   transcribedPreview: {
     flex: 1,

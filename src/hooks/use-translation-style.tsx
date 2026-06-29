@@ -8,7 +8,11 @@ import {
 } from 'react';
 
 import { getLocalString, setLocalString } from '@/lib/local-storage';
-import { isTranslationStyle, type TranslationStyle } from '@/lib/translation-style';
+import {
+  DefaultTranslationStyle,
+  isTranslationStyle,
+  type TranslationStyle,
+} from '@/lib/translation-style';
 
 type TranslationStyleContextValue = {
   isLoaded: boolean;
@@ -17,7 +21,6 @@ type TranslationStyleContextValue = {
 };
 
 const TranslationStyleStorageKey = 'just-speak-it:translation-style:v1';
-const DefaultTranslationStyle: TranslationStyle = 'native';
 const TranslationStyleContext = createContext<TranslationStyleContextValue | null>(null);
 
 export function TranslationStyleProvider({ children }: { children: ReactNode }) {

@@ -8,6 +8,38 @@ drop table if exists public.translation_cards cascade;
 drop table if exists public.practice_generations cascade;
 drop table if exists public.diary_entries cascade;
 
+drop function if exists public.save_practice_draft(
+  text,
+  text,
+  text,
+  text,
+  boolean,
+  jsonb,
+  jsonb,
+  jsonb,
+  text,
+  text,
+  text,
+  text,
+  text,
+  jsonb
+);
+drop function if exists public.save_practice_draft(
+  text,
+  text,
+  text,
+  text,
+  jsonb,
+  jsonb,
+  jsonb,
+  text,
+  text,
+  text,
+  text,
+  text,
+  jsonb
+);
+
 delete from auth.users where is_anonymous = true;
 
 create extension if not exists pgcrypto;
@@ -30,6 +62,7 @@ create table public.diary_entries (
   source text not null check (source in ('text', 'voice')),
   original_text text not null,
   plain_text text not null,
+  is_transcript_edited boolean not null default false,
   bullet_points jsonb not null
     check (jsonb_typeof(bullet_points) = 'array' and jsonb_array_length(bullet_points) >= 1),
   transcript_words jsonb not null default '[]'::jsonb
@@ -49,7 +82,7 @@ create table public.practice_generations (
   client_request_id text not null,
   card_split_policy text not null
     check (card_split_policy in ('meaning_unit', 'small_steps')),
-  translation_style text not null default 'native'
+  translation_style text not null default 'simple'
     check (translation_style in ('native', 'simple')),
   status text not null default 'draft'
     check (status in ('draft', 'translating', 'completed', 'failed', 'discarded')),
@@ -170,6 +203,7 @@ create or replace function public.save_practice_draft(
   p_source text,
   p_original_text text,
   p_plain_text text,
+  p_is_transcript_edited boolean,
   p_bullet_points jsonb,
   p_transcript_words jsonb,
   p_waveform_peaks jsonb,
@@ -236,6 +270,7 @@ begin
       source,
       original_text,
       plain_text,
+      is_transcript_edited,
       bullet_points,
       transcript_words,
       waveform_peaks,
@@ -246,6 +281,7 @@ begin
       p_source,
       p_original_text,
       p_plain_text,
+      case when p_source = 'voice' then coalesce(p_is_transcript_edited, false) else false end,
       p_bullet_points,
       p_transcript_words,
       p_waveform_peaks,
@@ -606,6 +642,7 @@ revoke execute on function public.save_practice_draft(
   text,
   text,
   text,
+  boolean,
   jsonb,
   jsonb,
   jsonb,
@@ -628,6 +665,7 @@ grant execute on function public.save_practice_draft(
   text,
   text,
   text,
+  boolean,
   jsonb,
   jsonb,
   jsonb,

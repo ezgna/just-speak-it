@@ -1,2 +1,0 @@
--- Remote migration history placeholder.
--- このバージョンは remote で適用済みだが、local 履歴から欠けていたため履歴整合用に残す。

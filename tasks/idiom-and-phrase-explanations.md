@@ -35,7 +35,7 @@
   - `src/components/english-practice-deck.tsx`
   - `src/lib/backend/practice.ts`
   - `supabase/functions/complete-practice/index.ts`
-  - `supabase/migrations/20260531000000_init_word_timestamp_schema.sql`
+  - `supabase/migrations/20260626000000_rebuild_practice_schema.sql`
   - `src/lib/supabase/database.types.ts`
 - `complete-practice` で英訳を作るタイミングに、表現解説も構造化して返すのが自然そう。
 - DB に保存するなら、`translation_cards` へ JSON カラムを足すか、`translation_card_phrase_notes` のような別テーブルに分ける案がある。

@@ -2,6 +2,7 @@ export type CardSplitPolicy = 'meaning_unit' | 'small_steps';
 export type EntrySource = 'text' | 'voice';
 export type PracticeGenerationStatus = 'draft' | 'translating' | 'completed' | 'failed' | 'discarded';
 export type TranslationStyle = 'native' | 'simple';
+export const DefaultTranslationStyle: TranslationStyle = 'simple';
 
 export type TranscriptWord = {
   index: number;
@@ -99,7 +100,10 @@ export function parseCompletePracticeRequest(value: unknown): ParseResult<Comple
     return practiceGenerationId;
   }
 
-  const translationStyle = parseTranslationStyle(value.translationStyle);
+  const translationStyle =
+    value.translationStyle === undefined || value.translationStyle === null
+      ? DefaultTranslationStyle
+      : parseTranslationStyle(value.translationStyle);
 
   if (!translationStyle) {
     return { type: 'error', message: 'translationStyleが不正です。' };

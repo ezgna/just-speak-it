@@ -5,7 +5,7 @@ import { type CardSplitPolicy } from '@/lib/card-split-policy';
 import { UserFacingBackendError } from '@/lib/backend/errors';
 import type { CardLearningProgress, CardLearningStatus } from '@/lib/card-learning-statuses';
 import { requireSupabaseClient } from '@/lib/supabase/client';
-import { type TranslationStyle } from '@/lib/translation-style';
+import { DefaultTranslationStyle, type TranslationStyle } from '@/lib/translation-style';
 
 export type TranslationCard = {
   id: string;
@@ -247,7 +247,7 @@ export async function preparePracticeDraft({
 
 export async function completePracticeDraft({
   practiceGenerationId,
-  translationStyle = 'native',
+  translationStyle = DefaultTranslationStyle,
 }: CompletePracticeDraftParams) {
   await ensureAnonymousSession();
 
@@ -371,7 +371,7 @@ export async function discardPracticeDraft(practiceGenerationId: string) {
 }
 
 export async function generatePracticeFromDiary({
-  translationStyle = 'native',
+  translationStyle = DefaultTranslationStyle,
   ...params
 }: PreparePracticeDraftParams & { translationStyle?: TranslationStyle }) {
   const draft = await preparePracticeDraft(params);
