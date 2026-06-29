@@ -36,10 +36,8 @@ import {
   type PracticeDraftCard,
   type TranslationCardGroup,
 } from '@/lib/backend/practice';
-import { isCardDue } from '@/lib/card-learning-statuses';
 import { setHapticsAllowedDuringRecording } from '@/lib/audio-session-haptics';
 import { notifyPracticeChanged } from '@/lib/practice-refresh';
-import { flattenTranslationCardGroups } from '@/lib/practice-cards';
 import { transcribeRecording, type TranscriptionWord } from '@/lib/backend/transcription';
 import {
   clearLocalRecordingError,
@@ -73,7 +71,8 @@ export default function HomeScreen() {
   const recorderState = useAudioRecorderState(audioRecorder, RecordingStatusIntervalMs);
   const { cardSplitPolicy } = useCardSplitPolicy();
   const { translationStyle } = useTranslationStyle();
-  const { groups: reviewGroups } = useTranslationCardGroups();
+  const { groups: reviewGroups, isInitialLoading: isReviewGroupsInitialLoading } =
+    useTranslationCardGroups();
   const [entryMode, setEntryMode] = useState<EntryMode>('voice');
   const [diaryDraftText, setDiaryDraftText] = useState('');
   const [writeDraftText, setWriteDraftText] = useState('');
@@ -97,10 +96,6 @@ export default function HomeScreen() {
   const [activeDraft, setActiveDraft] = useState<PracticeDraft | null>(null);
   const [draftCards, setDraftCards] = useState<PracticeDraftCard[]>([]);
   const [completedPractice, setCompletedPractice] = useState<CompletedPractice | null>(null);
-  const [embeddedReviewDueState, setEmbeddedReviewDueState] = useState<{
-    groupKey: string;
-    dueCount: number;
-  } | null>(null);
   const generationInFlightRef = useRef(false);
   const draftInteractionVersionRef = useRef(0);
   const draftClientRequestIdRef = useRef<string | null>(null);
@@ -204,46 +199,27 @@ export default function HomeScreen() {
       ),
     ];
   }, [completedPracticeGroup, reviewGroups]);
-  const hasEmbeddedReviewCards = useMemo(() => {
-    return flattenTranslationCardGroups(embeddedReviewGroups).some((card) =>
-      isCardDue({ [card.id]: card.learningProgress }, card.id)
-    );
-  }, [embeddedReviewGroups]);
-  const embeddedReviewGroupKey = useMemo(
-    () => embeddedReviewGroups.map((group) => group.practiceGenerationId).join('|'),
+  const hasEmbeddedReviewContent = useMemo(
+    () => embeddedReviewGroups.some((group) => group.cards.length > 0),
     [embeddedReviewGroups]
   );
-  const embeddedReviewDueCount =
-    embeddedReviewDueState?.groupKey === embeddedReviewGroupKey
-      ? embeddedReviewDueState.dueCount
-      : null;
   const shouldShowEmbeddedReview =
     !isWriteMode &&
     isEntryIdle &&
     !hasCurrentDraftText &&
     (shouldKeepEmbeddedReviewVisible || !isWritingButtonActive) &&
-    hasEmbeddedReviewCards &&
-    embeddedReviewDueCount !== 0;
+    hasEmbeddedReviewContent;
+  const shouldShowStarterPrompt =
+    !isWriteMode &&
+    isEntryIdle &&
+    !hasCurrentDraftText &&
+    !hasEmbeddedReviewContent &&
+    !shouldShowTranscriptionError;
   const shouldShowBottomPrimaryAction =
     !shouldShowEmbeddedReview &&
     (hasActiveDraft ||
       !isWriteMode ||
       (isWriteMode && (hasCurrentDraftText || isWritingButtonActive)));
-  const handleEmbeddedReviewDueCountChange = useCallback(
-    (dueCount: number) => {
-      setEmbeddedReviewDueState((currentState) => {
-        if (
-          currentState?.groupKey === embeddedReviewGroupKey &&
-          currentState.dueCount === dueCount
-        ) {
-          return currentState;
-        }
-
-        return { groupKey: embeddedReviewGroupKey, dueCount };
-      });
-    },
-    [embeddedReviewGroupKey]
-  );
 
   const markDraftInteraction = useCallback(() => {
     draftInteractionVersionRef.current += 1;
@@ -883,11 +859,16 @@ export default function HomeScreen() {
               footerAccessory={renderPrimaryActionButton()}
               groups={embeddedReviewGroups}
               headerAccessory={modeSwitchButton}
-              onDueCountChange={handleEmbeddedReviewDueCountChange}
               safeAreaInsets={safeAreaInsets}
               variant="embedded"
             />
           </View>
+        ) : shouldShowStarterPrompt ? (
+          <TodayStarterCard
+            isLoading={isReviewGroupsInitialLoading}
+            isRecording={isRecordingButtonActive}
+            isWorking={isWritingButtonActive}
+          />
         ) : shouldShowTranscribedPreview ? (
           <DiaryDraftPreview text={diaryDraftText} statusLabel="Splitting" />
         ) : shouldShowVoiceTranscriptEditor ? (
@@ -1070,6 +1051,57 @@ function DiaryDraftPreview({ text, statusLabel }: { text: string; statusLabel: s
   );
 }
 
+function TodayStarterCard({
+  isLoading,
+  isRecording,
+  isWorking,
+}: {
+  isLoading: boolean;
+  isRecording: boolean;
+  isWorking: boolean;
+}) {
+  const palette = useDailyPalette();
+  const title = isLoading
+    ? '今日のカードを確認中'
+    : isRecording
+      ? 'そのまま話してみましょう'
+      : isWorking
+        ? 'カードの準備中'
+        : '最初のカードを作ろう';
+  const body = isLoading
+    ? '保存済みの英語カードを読み込んでいます。'
+    : isRecording
+      ? '話し終えたら下のボタンで止めてください。話した内容から英語カードを作れます。'
+      : isWorking
+        ? '話した内容を整理しています。少しだけ待ってください。'
+        : '下の Speak it を押して、今日考えていることをなんでも話してみましょう。短くても大丈夫です。';
+
+  return (
+    <View style={styles.starterCardArea}>
+      <View
+        style={[
+          styles.starterCard,
+          {
+            borderColor: palette.text,
+            backgroundColor: palette.card,
+          },
+        ]}>
+        <View style={[styles.starterBadge, { backgroundColor: palette.tealSoft }]}>
+          <ThemedText style={[styles.starterBadgeText, { color: palette.teal }]}>
+            Speak it
+          </ThemedText>
+        </View>
+        <ThemedText style={[styles.starterTitle, { color: palette.text }]} selectable>
+          {title}
+        </ThemedText>
+        <ThemedText style={[styles.starterBody, { color: palette.muted }]} selectable>
+          {body}
+        </ThemedText>
+      </View>
+    </View>
+  );
+}
+
 function formatDuration(durationMillis: number) {
   const totalSeconds = Math.max(0, Math.floor(durationMillis / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -1167,6 +1199,40 @@ const styles = StyleSheet.create({
     fontSize: 22,
     lineHeight: 34,
     fontWeight: 800,
+  },
+  starterCardArea: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+  },
+  starterCard: {
+    width: '100%',
+    borderRadius: 20,
+    borderCurve: 'continuous',
+    borderWidth: 4,
+    padding: Spacing.four,
+    gap: Spacing.three,
+  },
+  starterBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: Spacing.two,
+  },
+  starterBadgeText: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: 900,
+  },
+  starterTitle: {
+    fontSize: 28,
+    lineHeight: 36,
+    fontWeight: 900,
+  },
+  starterBody: {
+    fontSize: 17,
+    lineHeight: 26,
+    fontWeight: 700,
   },
   modeActionLayer: {
     position: 'absolute',

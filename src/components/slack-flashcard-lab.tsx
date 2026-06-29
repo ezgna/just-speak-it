@@ -27,7 +27,10 @@ import Animated, {
 import Svg, { Circle } from 'react-native-svg';
 
 import { useDailyPalette } from '@/components/just-speak-it-ui';
-import { LocalRecordingPlayButton } from '@/components/local-recording-play-button';
+import {
+  LocalRecordingPlayButton,
+  type LocalRecordingPlayButtonHandle,
+} from '@/components/local-recording-play-button';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useCardLearningStatuses } from '@/hooks/use-card-learning-statuses';
@@ -165,7 +168,7 @@ export function SlackFlashcardLab({
   const rootBackgroundColor = isEmbedded ? 'transparent' : palette.background;
   const doneBodyText = isEmbedded
     ? '次に復習日が来たカードから、この画面にまた出ます。'
-    : '次に復習日が来たカードから、この復習タブに戻ってきます。';
+    : '次に復習日が来たカードから、この画面にまた戻ってきます。';
 
   const handleRootLayout = useCallback((event: LayoutChangeEvent) => {
     const { width: nextWidth, height: nextHeight } = event.nativeEvent.layout;
@@ -642,6 +645,13 @@ export function SlackFlashcardLab({
               </ThemedText>
             </View>
           </View>
+          {footerAccessory ? (
+            <View style={[styles.reviewFooter, isEmbedded ? styles.embeddedReviewFooter : null]}>
+              <View style={styles.footerAccessory}>
+                {footerAccessory}
+              </View>
+            </View>
+          ) : null}
         </View>
       </Animated.View>
     );
@@ -943,6 +953,7 @@ const SlackCardFace = memo(function SlackCardFace({
   onToggleAnswer?: () => void;
 }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const localRecordingPlayButtonRef = useRef<LocalRecordingPlayButtonHandle>(null);
   const flipAccessibilityLabel = isAnswerVisible ? '日本語を表示する' : '英語を表示する';
   const cardBodyText = isAnswerVisible ? card.english : card.japanese;
   const answerBodyMaxLines = Math.max(
@@ -982,6 +993,7 @@ const SlackCardFace = memo(function SlackCardFace({
       return;
     }
 
+    localRecordingPlayButtonRef.current?.stop();
     setIsSpeaking(true);
     void Speech.stop();
     Speech.speak(card.english, {
@@ -1056,6 +1068,7 @@ const SlackCardFace = memo(function SlackCardFace({
           {!isPreview && isAnswerVisible ? (
             <View pointerEvents="box-none" style={styles.answerSoundRow}>
               <LocalRecordingPlayButton
+                ref={localRecordingPlayButtonRef}
                 diaryEntryId={card.diaryEntryId}
                 audioStartSec={card.audioStartSec}
                 audioEndSec={card.audioEndSec}
@@ -1082,9 +1095,9 @@ const SlackCardFace = memo(function SlackCardFace({
                 ]}>
                 <SymbolView
                   name={{
-                    ios: isSpeaking ? 'speaker.wave.3.fill' : 'speaker.wave.2.fill',
-                    android: 'volume_up',
-                    web: 'volume_up',
+                    ios: isSpeaking ? 'pause.fill' : 'speaker.wave.2.fill',
+                    android: isSpeaking ? 'pause' : 'volume_up',
+                    web: isSpeaking ? 'pause' : 'volume_up',
                   }}
                   size={18}
                   tintColor={LabColors.text}

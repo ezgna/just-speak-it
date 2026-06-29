@@ -1,6 +1,6 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { SymbolView } from 'expo-symbols';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -26,22 +26,32 @@ type LocalRecordingPlayButtonProps = {
   onPlayStart?: () => void;
 };
 
+export type LocalRecordingPlayButtonHandle = {
+  stop: () => void;
+};
+
 const ClipStopToleranceSec = 0.04;
 
-export function LocalRecordingPlayButton({
-  diaryEntryId,
-  audioStartSec,
-  audioEndSec,
-  size = 36,
-  iconSize = 16,
-  backgroundColor = '#FFFFFF',
-  activeBackgroundColor = '#111111',
-  borderColor = '#111111',
-  tintColor = '#111111',
-  activeTintColor = '#FFFFFF',
-  style,
-  onPlayStart,
-}: LocalRecordingPlayButtonProps) {
+export const LocalRecordingPlayButton = forwardRef<
+  LocalRecordingPlayButtonHandle,
+  LocalRecordingPlayButtonProps
+>(function LocalRecordingPlayButton(
+  {
+    diaryEntryId,
+    audioStartSec,
+    audioEndSec,
+    size = 36,
+    iconSize = 16,
+    backgroundColor = '#FFFFFF',
+    activeBackgroundColor = '#111111',
+    borderColor = '#111111',
+    tintColor = '#111111',
+    activeTintColor = '#FFFFFF',
+    style,
+    onPlayStart,
+  },
+  ref
+) {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [isClipActive, setIsClipActive] = useState(false);
   const clipStartSec = normalizeClipBoundary(audioStartSec);
@@ -60,6 +70,18 @@ export function LocalRecordingPlayButton({
   const status = useAudioPlayerStatus(player);
   const isPlaying = isClipActive && status.playing;
   const currentTintColor = isPlaying ? activeTintColor : tintColor;
+  const stopPlayback = useCallback(() => {
+    pauseAudioPlayerSafely(player);
+    setIsClipActive(false);
+  }, [player]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      stop: stopPlayback,
+    }),
+    [stopPlayback]
+  );
 
   useEffect(() => {
     return subscribeToLocalRecordings(() => {
@@ -134,8 +156,7 @@ export function LocalRecordingPlayButton({
     }
 
     if (isPlaying) {
-      pauseAudioPlayerSafely(player);
-      setIsClipActive(false);
+      stopPlayback();
       return;
     }
 
@@ -147,7 +168,7 @@ export function LocalRecordingPlayButton({
     } catch {
       setIsClipActive(false);
     }
-  }, [clipEndSec, clipStartSec, isPlaying, onPlayStart, player, source]);
+  }, [clipEndSec, clipStartSec, isPlaying, onPlayStart, player, source, stopPlayback]);
 
   if (!isLocalRecordingSupported() || !source || !hasPlayableRange) {
     return null;
@@ -187,7 +208,7 @@ export function LocalRecordingPlayButton({
       />
     </Pressable>
   );
-}
+});
 
 function normalizeClipBoundary(value: number | null) {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
