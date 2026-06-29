@@ -130,33 +130,60 @@ export default function HomeScreen() {
   const hasVoiceDraftText = diaryDraftText.trim().length > 0;
   const hasWriteDraftText = writeDraftText.trim().length > 0;
   const hasActiveDraft = Boolean(currentDraft && draftCards.length > 0);
+  const hasVoiceActiveDraft = Boolean(currentDraft?.source === 'voice' && draftCards.length > 0);
+  const hasVisibleDraftPreview = hasActiveDraft && !hasVoiceActiveDraft;
   const hasCurrentDraftText = isWriteMode
     ? hasWriteDraftText
     : diaryDraftSource === 'voice' && hasVoiceDraftText;
+  const isVoiceAutoGenerationBusy =
+    !isWriteMode &&
+    diaryDraftSource === 'voice' &&
+    (isTranscribing || isPreparingDraft || isCompletingPractice);
+  const shouldShowVoiceRetryAction =
+    !isWriteMode &&
+    !isRecordingButtonActive &&
+    !isWritingButtonActive &&
+    (hasVoiceActiveDraft ||
+      (diaryDraftSource === 'voice' && Boolean(generationError) && hasVoiceDraftText));
+  const shouldKeepVoiceFlowVisible =
+    !isWriteMode &&
+    (diaryDraftSource === 'voice' || hasVoiceActiveDraft) &&
+    (recordingIntentActive ||
+      isRecordingButtonActive ||
+      isVoiceAutoGenerationBusy ||
+      shouldShowVoiceRetryAction);
   const shouldShowTranscribedPreview =
     !isWriteMode &&
     isPreparingDraft &&
     diaryDraftSource === 'voice' &&
     hasVoiceDraftText &&
-    !hasActiveDraft;
+    !hasActiveDraft &&
+    !shouldKeepVoiceFlowVisible;
   const shouldShowVoiceTranscriptEditor =
     !isWriteMode &&
     diaryDraftSource === 'voice' &&
     hasVoiceDraftText &&
     !hasActiveDraft &&
+    !shouldKeepVoiceFlowVisible &&
     !shouldShowTranscribedPreview;
   const shouldShowTranscriptionError = !isWriteMode && Boolean(transcriptionError);
-  const isEntryIdle = !hasActiveDraft;
+  const isEntryIdle = !hasVisibleDraftPreview;
   const shouldShowSplitAction =
     hasCurrentDraftText &&
     !hasActiveDraft &&
+    (isWriteMode || diaryDraftSource !== 'voice') &&
     !isRecordingButtonActive &&
     !isWritingButtonActive;
   const shouldShowMakeCardsAction =
-    hasActiveDraft && !isRecordingButtonActive && !isWritingButtonActive;
-  const shouldShowModeSwitch = isEntryIdle && !isRecordingButtonActive && !isWritingButtonActive;
+    hasVisibleDraftPreview && !isRecordingButtonActive && !isWritingButtonActive;
+  const shouldShowModeSwitch =
+    isEntryIdle &&
+    !isRecordingButtonActive &&
+    !isWritingButtonActive &&
+    !shouldShowVoiceRetryAction;
   const shouldKeepEmbeddedReviewVisible =
-    recordingIntentActive || isRecordingButtonActive || isTranscribing;
+    recordingIntentActive || isRecordingButtonActive || isVoiceAutoGenerationBusy || shouldShowVoiceRetryAction;
+  const shouldBlockEmbeddedReviewForDraftText = hasCurrentDraftText && !shouldKeepVoiceFlowVisible;
   const shouldDismissKeyboardOnContentTap =
     (isWriteMode || shouldShowVoiceTranscriptEditor) &&
     !hasActiveDraft;
@@ -206,13 +233,13 @@ export default function HomeScreen() {
   const shouldShowEmbeddedReview =
     !isWriteMode &&
     isEntryIdle &&
-    !hasCurrentDraftText &&
+    !shouldBlockEmbeddedReviewForDraftText &&
     (shouldKeepEmbeddedReviewVisible || !isWritingButtonActive) &&
     hasEmbeddedReviewContent;
   const shouldShowStarterPrompt =
     !isWriteMode &&
     isEntryIdle &&
-    !hasCurrentDraftText &&
+    !shouldBlockEmbeddedReviewForDraftText &&
     !hasEmbeddedReviewContent &&
     !shouldShowTranscriptionError;
   const shouldShowBottomPrimaryAction =
@@ -489,6 +516,7 @@ export default function HomeScreen() {
     nextWaveformPeaks: number[] = []
   ) {
     setIsTranscribing(true);
+    let shouldClearTranscribing = true;
     const normalizedWaveformPeaks = normalizeWaveformPeaks(nextWaveformPeaks);
 
     if (localRecordingId) {
@@ -513,6 +541,19 @@ export default function HomeScreen() {
       if (localRecordingId) {
         setPendingLocalRecordingId(localRecordingId);
       }
+
+      if (cleanedText) {
+        shouldClearTranscribing = false;
+        setIsTranscribing(false);
+        await handleAutoGenerateVoicePractice({
+          diaryText: cleanedText,
+          rawTranscriptText: transcript.rawText,
+          transcriptWords: transcript.words,
+          waveformPeaks: normalizedWaveformPeaks,
+          isTranscriptEdited: false,
+          localRecordingId,
+        });
+      }
     } catch (error) {
       const errorMessage =
         error instanceof Error ? error.message : '音声の読み取りに失敗しました。';
@@ -524,9 +565,47 @@ export default function HomeScreen() {
         setRetryRecordingId(localRecordingId);
       }
     } finally {
-      setIsTranscribing(false);
+      if (shouldClearTranscribing) {
+        setIsTranscribing(false);
+      }
       setWritingPressHeld(false);
     }
+  }
+
+  async function handleAutoGenerateVoicePractice({
+    diaryText,
+    rawTranscriptText: nextRawTranscriptText,
+    transcriptWords: nextTranscriptWords,
+    waveformPeaks: nextWaveformPeaks,
+    isTranscriptEdited: nextIsTranscriptEdited,
+    localRecordingId,
+    draft,
+  }: {
+    diaryText: string;
+    rawTranscriptText?: string | null;
+    transcriptWords?: TranscriptionWord[];
+    waveformPeaks?: number[];
+    isTranscriptEdited?: boolean;
+    localRecordingId?: string | null;
+    draft?: PracticeDraft | null;
+  }) {
+    const draftToComplete =
+      draft ??
+      (await handlePrepareDraft({
+        diaryText,
+        source: 'voice',
+        rawTranscriptText: nextRawTranscriptText,
+        transcriptWords: nextTranscriptWords,
+        waveformPeaks: nextWaveformPeaks,
+        isTranscriptEdited: nextIsTranscriptEdited,
+        localRecordingId,
+      }));
+
+    if (!draftToComplete) {
+      return null;
+    }
+
+    return await handleCompletePractice(draftToComplete);
   }
 
   async function handlePrepareDraft({
@@ -607,15 +686,21 @@ export default function HomeScreen() {
     }
   }
 
-  async function handleCompletePractice() {
+  async function handleCompletePractice(draft?: PracticeDraft | null) {
     markDraftInteraction();
+    const draftToComplete = draft ?? currentDraft;
+    const cardsToComplete =
+      draftToComplete?.practiceGenerationId === currentDraft?.practiceGenerationId
+        ? draftCards
+        : draftToComplete?.cards ?? [];
+
     if (
-      !currentDraft ||
-      draftCards.length === 0 ||
+      !draftToComplete ||
+      cardsToComplete.length === 0 ||
       isCompletingPractice ||
       generationInFlightRef.current
     ) {
-      return;
+      return null;
     }
 
     generationInFlightRef.current = true;
@@ -624,7 +709,7 @@ export default function HomeScreen() {
 
     try {
       const practice = await completePracticeDraft({
-        practiceGenerationId: currentDraft.practiceGenerationId,
+        practiceGenerationId: draftToComplete.practiceGenerationId,
         translationStyle,
       });
       clearDraftClientRequestId();
@@ -638,9 +723,11 @@ export default function HomeScreen() {
       setTranscriptWords([]);
       setWaveformPeaks([]);
       notifyPracticeChanged();
+      return practice;
     } catch (error) {
       logBackendError('completePracticeDraft', error);
       setGenerationError(formatBackendErrorForDisplay(error, '英語カードの作成に失敗しました。'));
+      return null;
     } finally {
       generationInFlightRef.current = false;
       setIsCompletingPractice(false);
@@ -671,6 +758,30 @@ export default function HomeScreen() {
     if (recorderState.isRecording) {
       setWritingPressHeld(true);
       await stopRecording();
+      return;
+    }
+
+    if (shouldShowVoiceRetryAction) {
+      if (hasVoiceActiveDraft && currentDraft) {
+        await handleAutoGenerateVoicePractice({
+          diaryText: currentDraft.diaryEntry.plainText,
+          rawTranscriptText: currentDraft.diaryEntry.originalText,
+          transcriptWords: currentDraft.diaryEntry.transcriptWords,
+          waveformPeaks: currentDraft.diaryEntry.waveformPeaks,
+          isTranscriptEdited: currentDraft.diaryEntry.isTranscriptEdited,
+          draft: currentDraft,
+        });
+        return;
+      }
+
+      await handleAutoGenerateVoicePractice({
+        diaryText: diaryDraftText,
+        rawTranscriptText,
+        transcriptWords,
+        waveformPeaks,
+        isTranscriptEdited,
+        localRecordingId: pendingLocalRecordingId,
+      });
       return;
     }
 
@@ -790,7 +901,7 @@ export default function HomeScreen() {
     />
   ) : null;
 
-  const topActionButton = hasActiveDraft && !isCompletingPractice ? (
+  const topActionButton = hasVisibleDraftPreview && !isCompletingPractice ? (
     <View
       pointerEvents="box-none"
       style={[
@@ -828,7 +939,7 @@ export default function HomeScreen() {
     <View
       style={[
         styles.contentArea,
-        hasActiveDraft && !isCompletingPractice ? styles.contentAreaWithTopAction : null,
+        hasVisibleDraftPreview && !isCompletingPractice ? styles.contentAreaWithTopAction : null,
       ]}>
       <View style={styles.draftStack}>
         {shouldShowTranscriptionError && transcriptionError && (
@@ -851,7 +962,7 @@ export default function HomeScreen() {
           </View>
         )}
 
-        {hasActiveDraft ? (
+        {hasVisibleDraftPreview ? (
           <GeneratedPracticePreview cards={draftCards} />
         ) : shouldShowEmbeddedReview ? (
           <View style={styles.embeddedReviewArea}>
@@ -936,32 +1047,38 @@ export default function HomeScreen() {
           isTranscribing
             ? 'Transcribing'
             : isPreparingDraft
-              ? 'Splitting'
+              ? 'Preparing cards'
               : isCompletingPractice
-                ? 'Making it'
+                ? 'Making cards'
                 : isRecordingButtonActive
                   ? recordingButtonDurationLabel
-                  : shouldShowMakeCardsAction
-                    ? 'Make cards'
-                    : shouldShowSplitAction
-                      ? 'Split it'
-                      : 'Speak it'
+                  : shouldShowVoiceRetryAction
+                    ? 'Try again'
+                    : shouldShowMakeCardsAction
+                      ? 'Make cards'
+                      : shouldShowSplitAction
+                        ? 'Split it'
+                        : 'Speak it'
         }
         accessibilityLabel={
           isRecordingButtonActive
             ? `録音を停止 ${recordingButtonDurationLabel}`
-            : shouldShowMakeCardsAction
-              ? '英語カードを作る'
-              : shouldShowSplitAction
-                ? '日本語を英語カード向けに分割する'
-                : undefined
+            : shouldShowVoiceRetryAction
+              ? '英語カード生成を再試行する'
+              : shouldShowMakeCardsAction
+                ? '英語カードを作る'
+                : shouldShowSplitAction
+                  ? '日本語を英語カード向けに分割する'
+                  : undefined
         }
         icon={
           isRecordingButtonActive
             ? { ios: 'stop.circle.fill', android: 'stop_circle', web: 'stop_circle' }
-            : shouldShowMakeCardsAction
-              ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
-              : shouldShowSplitAction || isPreparingDraft
+            : shouldShowVoiceRetryAction
+              ? { ios: 'arrow.clockwise', android: 'refresh', web: 'refresh' }
+              : shouldShowMakeCardsAction || isCompletingPractice
+                ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
+                : shouldShowSplitAction || isPreparingDraft
                 ? { ios: 'rectangle.split.2x1.fill', android: 'splitscreen', web: 'splitscreen' }
                 : { ios: 'mic.fill', android: 'mic', web: 'mic' }
         }
@@ -973,7 +1090,9 @@ export default function HomeScreen() {
               ? 'blue'
               : isRecordingButtonActive
                 ? 'orange'
-                : shouldShowMakeCardsAction
+                : shouldShowVoiceRetryAction
+                  ? 'orange'
+                  : shouldShowMakeCardsAction
                   ? 'blue'
                   : shouldShowSplitAction
                     ? 'orange'

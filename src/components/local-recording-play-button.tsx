@@ -1,9 +1,23 @@
 import { useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
 import { SymbolView } from 'expo-symbols';
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useState } from 'react';
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Pressable, StyleSheet, type StyleProp, type ViewStyle } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import {
+  beginExclusiveAudioPlayback,
+  cancelAudioPlaybackKey,
+  registerAudioPlaybackStopper,
+  type AudioPlaybackLease,
+} from '@/lib/audio/playback-coordinator';
 import { pauseAudioPlayerSafely, seekAudioPlayerSafely } from '@/lib/audio/player';
 import {
   getLocalRecordingUriForDiaryEntry,
@@ -23,7 +37,7 @@ type LocalRecordingPlayButtonProps = {
   tintColor?: string;
   activeTintColor?: string;
   style?: StyleProp<ViewStyle>;
-  onPlayStart?: () => void;
+  onPlayStart?: () => Promise<void> | void;
 };
 
 export type LocalRecordingPlayButtonHandle = {
@@ -31,6 +45,7 @@ export type LocalRecordingPlayButtonHandle = {
 };
 
 const ClipStopToleranceSec = 0.04;
+let localRecordingPlayButtonInstanceId = 0;
 
 export const LocalRecordingPlayButton = forwardRef<
   LocalRecordingPlayButtonHandle,
@@ -54,6 +69,10 @@ export const LocalRecordingPlayButton = forwardRef<
 ) {
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [isClipActive, setIsClipActive] = useState(false);
+  const [isPlaybackStarting, setIsPlaybackStarting] = useState(false);
+  const activePlaybackLeaseRef = useRef<AudioPlaybackLease | null>(null);
+  const instanceIdRef = useRef((localRecordingPlayButtonInstanceId += 1));
+  const playbackRequestIdRef = useRef(0);
   const clipStartSec = normalizeClipBoundary(audioStartSec);
   const clipEndSec = normalizeClipBoundary(audioEndSec);
   const hasPlayableRange =
@@ -66,14 +85,24 @@ export const LocalRecordingPlayButton = forwardRef<
       : null;
   const source = useMemo(() => (recordingUri ? { uri: recordingUri } : null), [recordingUri]);
   const sourceKey = source?.uri ?? 'none';
+  const playbackKey = useMemo(
+    () =>
+      `local-recording:${diaryEntryId}:${sourceKey}:${clipStartSec ?? 'none'}:${clipEndSec ?? 'none'}:${instanceIdRef.current}`,
+    [clipEndSec, clipStartSec, diaryEntryId, sourceKey]
+  );
   const player = useAudioPlayer(source, { updateInterval: 100 });
   const status = useAudioPlayerStatus(player);
-  const isPlaying = isClipActive && status.playing;
-  const currentTintColor = isPlaying ? activeTintColor : tintColor;
+  const isPlaybackActive = isClipActive || isPlaybackStarting;
+  const currentTintColor = isPlaybackActive ? activeTintColor : tintColor;
   const stopPlayback = useCallback(() => {
+    playbackRequestIdRef.current += 1;
+    activePlaybackLeaseRef.current?.cancel();
+    activePlaybackLeaseRef.current = null;
+    cancelAudioPlaybackKey(playbackKey);
     pauseAudioPlayerSafely(player);
     setIsClipActive(false);
-  }, [player]);
+    setIsPlaybackStarting(false);
+  }, [playbackKey, player]);
 
   useImperativeHandle(
     ref,
@@ -92,9 +121,14 @@ export const LocalRecordingPlayButton = forwardRef<
   useEffect(() => {
     let frameId: number | null = null;
 
+    playbackRequestIdRef.current += 1;
+    activePlaybackLeaseRef.current?.cancel();
+    activePlaybackLeaseRef.current = null;
+    cancelAudioPlaybackKey(playbackKey);
     pauseAudioPlayerSafely(player);
     frameId = requestAnimationFrame(() => {
       setIsClipActive(false);
+      setIsPlaybackStarting(false);
     });
 
     return () => {
@@ -102,13 +136,17 @@ export const LocalRecordingPlayButton = forwardRef<
         cancelAnimationFrame(frameId);
       }
     };
-  }, [player, sourceKey]);
+  }, [playbackKey, player, sourceKey]);
 
   useEffect(() => {
     return () => {
-      pauseAudioPlayerSafely(player);
+      stopPlayback();
     };
-  }, [player]);
+  }, [stopPlayback]);
+
+  useEffect(() => {
+    return registerAudioPlaybackStopper(playbackKey, stopPlayback);
+  }, [playbackKey, stopPlayback]);
 
   useEffect(() => {
     if (
@@ -119,14 +157,16 @@ export const LocalRecordingPlayButton = forwardRef<
       return;
     }
 
-    if (
-      !status.playing ||
-      (status.currentTime < clipEndSec - ClipStopToleranceSec && !status.didJustFinish)
-    ) {
+    const hasClipEnded =
+      status.didJustFinish || status.currentTime >= clipEndSec - ClipStopToleranceSec;
+
+    if (!hasClipEnded) {
       return;
     }
 
     pauseAudioPlayerSafely(player);
+    activePlaybackLeaseRef.current?.finish();
+    activePlaybackLeaseRef.current = null;
     const frameId = requestAnimationFrame(() => {
       setIsClipActive(false);
       void seekAudioPlayerSafely(player, clipStartSec);
@@ -142,7 +182,6 @@ export const LocalRecordingPlayButton = forwardRef<
     player,
     status.currentTime,
     status.didJustFinish,
-    status.playing,
   ]);
 
   const handlePress = useCallback(async () => {
@@ -155,20 +194,63 @@ export const LocalRecordingPlayButton = forwardRef<
       return;
     }
 
-    if (isPlaying) {
+    if (isPlaybackActive) {
       stopPlayback();
       return;
     }
 
+    const playbackRequestId = playbackRequestIdRef.current + 1;
+    playbackRequestIdRef.current = playbackRequestId;
+    setIsPlaybackStarting(true);
+
     try {
+      await onPlayStart?.();
+      const playbackLease = await beginExclusiveAudioPlayback({ key: playbackKey });
+
+      if (!playbackLease) {
+        return;
+      }
+
+      activePlaybackLeaseRef.current = playbackLease;
+
+      if (playbackRequestIdRef.current !== playbackRequestId) {
+        playbackLease.cancel();
+        return;
+      }
+
       await player.seekTo(clipStartSec);
-      onPlayStart?.();
+
+      if (
+        playbackRequestIdRef.current !== playbackRequestId ||
+        !playbackLease.isCurrent()
+      ) {
+        playbackLease.cancel();
+        return;
+      }
+
       setIsClipActive(true);
       player.play();
     } catch {
-      setIsClipActive(false);
+      if (playbackRequestIdRef.current === playbackRequestId) {
+        setIsClipActive(false);
+        activePlaybackLeaseRef.current?.finish();
+        activePlaybackLeaseRef.current = null;
+      }
+    } finally {
+      if (playbackRequestIdRef.current === playbackRequestId) {
+        setIsPlaybackStarting(false);
+      }
     }
-  }, [clipEndSec, clipStartSec, isPlaying, onPlayStart, player, source, stopPlayback]);
+  }, [
+    clipEndSec,
+    clipStartSec,
+    isPlaybackActive,
+    onPlayStart,
+    playbackKey,
+    player,
+    source,
+    stopPlayback,
+  ]);
 
   if (!isLocalRecordingSupported() || !source || !hasPlayableRange) {
     return null;
@@ -178,31 +260,30 @@ export const LocalRecordingPlayButton = forwardRef<
     <Pressable
       accessibilityRole="button"
       accessibilityLabel="録音の該当箇所を再生"
-      accessibilityState={{ selected: isPlaying }}
+      accessibilityState={{ busy: isPlaybackStarting, selected: isPlaybackActive }}
       hitSlop={8}
       onPress={handlePress}
-      style={({ pressed }) => [
+      style={[
         styles.button,
         {
           width: size,
           height: size,
           borderColor,
-          backgroundColor: isPlaying ? activeBackgroundColor : backgroundColor,
-          opacity: pressed ? 0.72 : 1,
+          backgroundColor: isPlaybackActive ? activeBackgroundColor : backgroundColor,
         },
         style,
       ]}>
       <SymbolView
         name={{
-          ios: isPlaying ? 'pause.fill' : 'waveform',
-          android: isPlaying ? 'pause' : 'graphic_eq',
-          web: isPlaying ? 'pause' : 'graphic_eq',
+          ios: isPlaybackActive ? 'pause.fill' : 'waveform',
+          android: isPlaybackActive ? 'pause' : 'graphic_eq',
+          web: isPlaybackActive ? 'pause' : 'graphic_eq',
         }}
         size={iconSize}
         tintColor={currentTintColor}
         fallback={
           <ThemedText style={[styles.fallbackIcon, { color: currentTintColor }]}>
-            {isPlaying ? '||' : '>'}
+            {isPlaybackActive ? '||' : '>'}
           </ThemedText>
         }
       />

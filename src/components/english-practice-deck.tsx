@@ -31,27 +31,19 @@ function MemoPracticeGroup({ group }: { group: TranslationCardGroup }) {
         ? 'Voice · Edited'
         : 'Voice'
       : 'Text';
-  const cardCountLabel = `${group.cards.length} ${group.cards.length === 1 ? 'card' : 'cards'}`;
 
   return (
     <View style={styles.memoGroup}>
-      <View style={styles.memoHeader}>
-        <View style={styles.memoMetaRow}>
-          <View style={styles.memoSourcePill}>
-            <ThemedText style={styles.memoSourceText}>{sourceLabel}</ThemedText>
-          </View>
+      <View style={styles.memoSeparator}>
+        <View style={styles.memoSourcePill}>
+          <ThemedText style={styles.memoSourceText}>{sourceLabel}</ThemedText>
+        </View>
+        <View style={styles.memoRule} />
+        <View style={styles.memoDatePill}>
           <ThemedText style={styles.memoDateText} selectable>
             {formatPracticeDate(group.createdAt)}
           </ThemedText>
         </View>
-
-        <ThemedText style={styles.memoExcerptText} numberOfLines={2} selectable>
-          {group.diaryExcerpt}
-        </ThemedText>
-
-        <ThemedText style={styles.memoCardCountText} selectable>
-          {cardCountLabel}
-        </ThemedText>
       </View>
 
       <View style={styles.transcriptList}>
@@ -134,23 +126,22 @@ const styles = StyleSheet.create({
   },
   memoGroup: {
     gap: Spacing.three,
-    borderTopWidth: 3,
-    borderColor: InkColor,
-    paddingTop: Spacing.three,
   },
-  memoHeader: {
-    gap: Spacing.two,
-  },
-  memoMetaRow: {
+  memoSeparator: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: Spacing.two,
   },
   memoSourcePill: {
     borderWidth: 2,
     borderColor: InkColor,
     backgroundColor: '#FFF6E7',
+    paddingHorizontal: Spacing.two,
+    paddingVertical: Spacing.half,
+  },
+  memoDatePill: {
+    borderWidth: 2,
+    borderColor: InkColor,
+    backgroundColor: '#FFFFFF',
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.half,
   },
@@ -165,18 +156,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
     fontWeight: 800,
+    fontVariant: ['tabular-nums'],
   },
-  memoExcerptText: {
-    color: InkColor,
-    fontSize: 17,
-    lineHeight: 25,
-    fontWeight: 800,
-  },
-  memoCardCountText: {
-    color: '#5F6670',
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: 800,
+  memoRule: {
+    flex: 1,
+    height: 3,
+    backgroundColor: InkColor,
+    borderRadius: 999,
   },
   transcriptList: {
     gap: Spacing.three,

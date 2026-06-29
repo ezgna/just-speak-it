@@ -27,13 +27,16 @@ import Animated, {
 import Svg, { Circle } from 'react-native-svg';
 
 import { useDailyPalette } from '@/components/just-speak-it-ui';
-import {
-  LocalRecordingPlayButton,
-  type LocalRecordingPlayButtonHandle,
-} from '@/components/local-recording-play-button';
+import { LocalRecordingPlayButton } from '@/components/local-recording-play-button';
 import { ThemedText } from '@/components/themed-text';
 import { BottomTabInset, MaxContentWidth, Spacing, TopTabInset } from '@/constants/theme';
 import { useCardLearningStatuses } from '@/hooks/use-card-learning-statuses';
+import {
+  beginExclusiveAudioPlayback,
+  registerAudioPlaybackStopper,
+  stopSpeechSafely,
+  type AudioPlaybackLease,
+} from '@/lib/audio/playback-coordinator';
 import type { TranslationCardGroup } from '@/lib/backend/practice';
 import {
   getCardProgress,
@@ -94,6 +97,10 @@ const AnswerTextMetrics = {
   lineHeight: 38,
 };
 const AnswerSoundControlSize = 40;
+const EnglishSpeechFallbackPaddingMs = 3200;
+const EnglishSpeechFallbackMinMs = 6000;
+const EnglishSpeechFallbackMaxMs = 45000;
+const EnglishSpeechStartDelayMs = 90;
 const DecisionRingSize = 68;
 const DecisionRingStrokeWidth = 4;
 const DecisionRingStartOffset = 32;
@@ -953,7 +960,10 @@ const SlackCardFace = memo(function SlackCardFace({
   onToggleAnswer?: () => void;
 }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const localRecordingPlayButtonRef = useRef<LocalRecordingPlayButtonHandle>(null);
+  const speechPlaybackLeaseRef = useRef<AudioPlaybackLease | null>(null);
+  const speechPlaybackIdRef = useRef(0);
+  const speechFallbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const speechPlaybackKey = useMemo(() => `english-tts:${card.id}`, [card.id]);
   const flipAccessibilityLabel = isAnswerVisible ? '日本語を表示する' : '英語を表示する';
   const cardBodyText = isAnswerVisible ? card.english : card.japanese;
   const answerBodyMaxLines = Math.max(
@@ -966,15 +976,82 @@ const SlackCardFace = memo(function SlackCardFace({
   const cardBodyMaxLines = isAnswerVisible ? Math.min(7, answerBodyMaxLines) : 8;
   const cardBodyTextStyle = isAnswerVisible ? styles.answerText : styles.promptText;
 
+  const clearSpeechFallbackTimeout = useCallback(() => {
+    if (speechFallbackTimeoutRef.current) {
+      clearTimeout(speechFallbackTimeoutRef.current);
+      speechFallbackTimeoutRef.current = null;
+    }
+  }, []);
+
+  const finishSpeechPlayback = useCallback(
+    (playbackId: number) => {
+      if (speechPlaybackIdRef.current !== playbackId) {
+        return;
+      }
+
+      clearSpeechFallbackTimeout();
+      speechPlaybackLeaseRef.current?.finish();
+      speechPlaybackLeaseRef.current = null;
+      setIsSpeaking(false);
+    },
+    [clearSpeechFallbackTimeout]
+  );
+
+  const scheduleSpeechFallbackTimeout = useCallback(
+    (playbackId: number, text: string) => {
+      clearSpeechFallbackTimeout();
+      speechFallbackTimeoutRef.current = setTimeout(() => {
+        if (speechPlaybackIdRef.current !== playbackId) {
+          return;
+        }
+
+        void Speech.stop();
+        finishSpeechPlayback(playbackId);
+      }, estimateEnglishSpeechFallbackMs(text));
+    },
+    [clearSpeechFallbackTimeout, finishSpeechPlayback]
+  );
+
+  const cancelEnglishSpeechPlayback = useCallback(() => {
+    speechPlaybackIdRef.current += 1;
+    clearSpeechFallbackTimeout();
+    speechPlaybackLeaseRef.current?.cancel();
+    speechPlaybackLeaseRef.current = null;
+    void stopSpeechSafely();
+  }, [clearSpeechFallbackTimeout]);
+
+  const stopEnglishSpeech = useCallback(() => {
+    cancelEnglishSpeechPlayback();
+    setIsSpeaking(false);
+  }, [cancelEnglishSpeechPlayback]);
+
+  useEffect(() => {
+    if (isPreview) {
+      return;
+    }
+
+    return registerAudioPlaybackStopper(speechPlaybackKey, () => {
+      cancelEnglishSpeechPlayback();
+      setIsSpeaking(false);
+    });
+  }, [cancelEnglishSpeechPlayback, isPreview, speechPlaybackKey]);
+
   useEffect(() => {
     if (isPreview) {
       return;
     }
 
     if (!isAnswerVisible) {
-      void Speech.stop();
+      cancelEnglishSpeechPlayback();
+      const frameId = requestAnimationFrame(() => {
+        setIsSpeaking(false);
+      });
+
+      return () => {
+        cancelAnimationFrame(frameId);
+      };
     }
-  }, [isAnswerVisible, isPreview]);
+  }, [cancelEnglishSpeechPlayback, isAnswerVisible, isPreview]);
 
   useEffect(() => {
     if (isPreview) {
@@ -982,33 +1059,78 @@ const SlackCardFace = memo(function SlackCardFace({
     }
 
     return () => {
-      void Speech.stop();
+      cancelEnglishSpeechPlayback();
     };
-  }, [card.id, isPreview]);
+  }, [cancelEnglishSpeechPlayback, card.id, isPreview]);
+
+  const startEnglishSpeechPlayback = useCallback(
+    async (playbackId: number, text: string) => {
+      const playbackLease = await beginExclusiveAudioPlayback({
+        delayMs: EnglishSpeechStartDelayMs,
+        key: speechPlaybackKey,
+      });
+
+      if (!playbackLease) {
+        return;
+      }
+
+      speechPlaybackLeaseRef.current = playbackLease;
+
+      if (speechPlaybackIdRef.current !== playbackId || !playbackLease.isCurrent()) {
+        playbackLease.cancel();
+        return;
+      }
+
+      Speech.speak(text, {
+        language: 'en-US',
+        rate: 0.9,
+        pitch: 1,
+        volume: 1,
+        onDone: () => finishSpeechPlayback(playbackId),
+        onStopped: () => finishSpeechPlayback(playbackId),
+        onError: () => finishSpeechPlayback(playbackId),
+      });
+    },
+    [finishSpeechPlayback, speechPlaybackKey]
+  );
 
   const handleSpeakPress = useCallback(() => {
     if (isSpeaking) {
-      void Speech.stop();
-      setIsSpeaking(false);
+      stopEnglishSpeech();
       return;
     }
 
-    localRecordingPlayButtonRef.current?.stop();
+    const playbackId = speechPlaybackIdRef.current + 1;
+    speechPlaybackIdRef.current = playbackId;
+    clearSpeechFallbackTimeout();
     setIsSpeaking(true);
-    void Speech.stop();
-    Speech.speak(card.english, {
-      language: 'en-US',
-      rate: 0.9,
-      pitch: 1,
-      onDone: () => setIsSpeaking(false),
-      onStopped: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
+    scheduleSpeechFallbackTimeout(playbackId, card.english);
+
+    void startEnglishSpeechPlayback(playbackId, card.english).catch(() => {
+      requestAnimationFrame(() => {
+        if (speechPlaybackIdRef.current !== playbackId) {
+          return;
+        }
+
+        finishSpeechPlayback(playbackId);
+      });
     });
-  }, [card.english, isSpeaking]);
+  }, [
+    card.english,
+    clearSpeechFallbackTimeout,
+    finishSpeechPlayback,
+    isSpeaking,
+    scheduleSpeechFallbackTimeout,
+    startEnglishSpeechPlayback,
+    stopEnglishSpeech,
+  ]);
   const handleLocalRecordingPlayStart = useCallback(() => {
-    void Speech.stop();
+    speechPlaybackIdRef.current += 1;
+    clearSpeechFallbackTimeout();
+    speechPlaybackLeaseRef.current?.cancel();
+    speechPlaybackLeaseRef.current = null;
     setIsSpeaking(false);
-  }, []);
+  }, [clearSpeechFallbackTimeout]);
   const backgroundTapGesture = useMemo(
     () =>
       Gesture.Tap()
@@ -1068,7 +1190,6 @@ const SlackCardFace = memo(function SlackCardFace({
           {!isPreview && isAnswerVisible ? (
             <View pointerEvents="box-none" style={styles.answerSoundRow}>
               <LocalRecordingPlayButton
-                ref={localRecordingPlayButtonRef}
                 diaryEntryId={card.diaryEntryId}
                 audioStartSec={card.audioStartSec}
                 audioEndSec={card.audioEndSec}
@@ -1086,11 +1207,10 @@ const SlackCardFace = memo(function SlackCardFace({
                 accessibilityLabel="英語を読み上げる"
                 hitSlop={8}
                 onPress={handleSpeakPress}
-                style={({ pressed }) => [
+                style={[
                   styles.soundButton,
                   {
                     backgroundColor: isSpeaking ? LabColors.mint : LabColors.cardTint,
-                    opacity: pressed ? 0.72 : 1,
                   },
                 ]}>
                 <SymbolView
@@ -1352,6 +1472,16 @@ function isPendingDismissalActive(
 
 function getCardLayerZIndex(position: number) {
   return VisibleCardCount + 1 - position;
+}
+
+function estimateEnglishSpeechFallbackMs(text: string) {
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
+  const estimatedSpeechMs = wordCount * 460 + EnglishSpeechFallbackPaddingMs;
+
+  return Math.min(
+    EnglishSpeechFallbackMaxMs,
+    Math.max(EnglishSpeechFallbackMinMs, estimatedSpeechMs)
+  );
 }
 
 const LabColors = {
